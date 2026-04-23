@@ -1,7 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
-import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
 
+/**
+ * IMPORTANTE: Para que estas variÃ¡veis funcionem na Vercel, vocÃª deve cadastrar
+ * cada uma delas nas "Environment Variables" do projeto no painel da Vercel
+ * com exatamente os mesmos nomes listados abaixo.
+ */
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,18 +17,33 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-// Debug log as requested
-console.log("Firebase Config:", firebaseConfig);
-
 const app = initializeApp(firebaseConfig);
-
-export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 
-// Set persistence to Local for better iframe compatibility
-setPersistence(auth, browserLocalPersistence).catch(err => {
-  console.error("Auth persistence error:", err);
-});
+export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const logout = () => signOut(auth);
+
+/**
+ * Checks if a user is an admin by looking at a "whitelist" in Firestore
+ * or a hardcoded list for initial setup.
+ */
+export const checkIfAdmin = async (user: User | null): Promise<boolean> => {
+  if (!user) return false;
+  
+  // Whitelist hardcoded based on the current user email provided in metadata
+  const whitelist = ['luiz.uehara1@gmail.com'];
+  if (whitelist.includes(user.email || '')) return true;
+
+  try {
+    const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+    return adminDoc.exists();
+  } catch (error) {
+    console.error("Error checking admin status:", error);
+    return false;
+  }
+};
 
 /**
  * Saves a new lead to the "leads" collection
@@ -42,4 +62,6 @@ export const saveLead = async (leadData: { name: string; phone: string; email?: 
   }
 };
 
+export { onAuthStateChanged };
+export type { User };
 export default app;

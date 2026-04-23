@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, FormEvent, useMemo } from 'react';
+import React, { useState, useEffect, FormEvent, useMemo } from 'react';
 import { 
   Home, 
   Search, 
@@ -30,7 +30,9 @@ import {
   Trash2,
   Eye,
   Settings,
-  LayoutDashboard
+  LayoutDashboard,
+  Calendar,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -38,20 +40,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // --- Firebase ---
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut, 
-  User,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  sendEmailVerification,
-  updateProfile
-} from 'firebase/auth';
-import { auth, saveLead } from './lib/firebase';
+import { saveLead, loginWithGoogle, logout, onAuthStateChanged, checkIfAdmin, User, auth } from './lib/firebase';
 
-const googleProvider = new GoogleAuthProvider();
+// --- Config ---
+const BROKER_PHONE = '5515981504714';
 
 // Fix for Leaflet default icon issues in Vite
 // @ts-ignore
@@ -237,6 +229,236 @@ const TEAM: TeamMember[] = [
 
 // --- Components ---
 
+function VisitRegistrationOverlay({ 
+  property, 
+  onClose 
+}: { 
+  property: Property, 
+  onClose: () => void 
+}) {
+  const [formData, setFormData] = useState({
+    name: '',
+    phone: '',
+    date: '',
+    time: '',
+    message: ''
+  });
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setStatus('loading');
+
+    try {
+      // Save to Firebase
+      await saveLead({
+        name: formData.name,
+        phone: formData.phone,
+        interest: `Visita Personalizada: ${property.title}`,
+        message: `Agendamento: ${formData.date} às ${formData.time}. Mensagem: ${formData.message}`
+      });
+
+      // Notification (simulation/pre-prep)
+      /* 
+      const WHATSAPP_API_URL = import.meta.env.VITE_WHATSAPP_API_URL;
+      if (WHATSAPP_API_URL) {
+        await fetch(WHATSAPP_API_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            to: BROKER_PHONE,
+            message: `Agendamento de Visita: ${property.title} por ${formData.name} em ${formData.date} às ${formData.time}`
+          })
+        });
+      }
+      */
+
+      setStatus('success');
+      
+      // Auto close after success? Maybe let the user read the success message
+    } catch (error) {
+      console.error('Erro ao agendar visita:', error);
+      setStatus('error');
+    }
+  };
+
+  if (status === 'success') {
+    return (
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[110] bg-brand-dark/95 backdrop-blur-xl flex items-center justify-center p-6"
+      >
+        <div className="bg-white rounded-[3rem] p-12 max-w-xl w-full text-center space-y-8 shadow-2xl relative">
+          <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
+            <Check size={48} />
+          </div>
+          <div>
+            <h3 className="text-3xl font-bold text-slate-900 mb-2">Agendamento Solicitado!</h3>
+            <p className="text-slate-500">Nossa equipe entrará em contato em breve para confirmar sua visita personalizada à {property.title}.</p>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-full btn-primary py-5 text-xl"
+          >
+            Voltar ao Site
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[110] bg-brand-dark/95 backdrop-blur-xl p-4 md:p-10 flex flex-col overflow-hidden"
+    >
+      <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
+        <div className="flex justify-between items-center mb-12">
+          <div className="flex items-center space-x-6 text-white">
+            <div className="w-16 h-16 bg-brand-orange rounded-3xl flex items-center justify-center">
+              <Calendar size={32} />
+            </div>
+            <div>
+              <h2 className="text-4xl font-bold">Visita Personalizada</h2>
+              <p className="text-white/50 text-lg italic font-serif">{property.title}</p>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="w-16 h-16 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center transition-all border border-white/10"
+          >
+            <X size={32} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto no-scrollbar pb-10">
+          <div className="grid lg:grid-cols-2 gap-16 items-start">
+            {/* Property Preview Card */}
+            <div className="hidden lg:block space-y-8 sticky top-0">
+              <div className="rounded-[2.5rem] overflow-hidden shadow-2xl border border-white/10">
+                <img src={property.image} className="w-full h-80 object-cover" alt={property.title} />
+                <div className="p-8 bg-white/5 backdrop-blur-md">
+                  <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-2xl font-bold text-white">{property.title}</h4>
+                    <span className="text-brand-orange font-bold text-xl">{property.price}</span>
+                  </div>
+                  <div className="flex items-center text-white/60 mb-6 font-medium italic">
+                    <MapPin size={18} className="mr-2 text-brand-orange" />
+                    {property.location}
+                  </div>
+                  <div className="grid grid-cols-3 gap-6 pt-6 border-t border-white/10">
+                    <div className="flex flex-col items-center">
+                      <BedDouble className="text-brand-orange mb-2" />
+                      <span className="text-white text-sm font-bold">{property.beds || '-'} Dorms</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <Bath className="text-brand-orange mb-2" />
+                      <span className="text-white text-sm font-bold">{property.baths || '-'} Suítes</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <Maximize className="text-brand-orange mb-2" />
+                      <span className="text-white text-sm font-bold">{property.area}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-brand-orange/10 border border-brand-orange/20 p-8 rounded-3xl">
+                <p className="text-brand-orange leading-relaxed font-medium italic text-lg text-center">
+                  "Viva a experiência exclusiva de conhecer cada detalhe desta propriedade excepcional."
+                </p>
+              </div>
+            </div>
+
+            {/* Visit Form */}
+            <div className="bg-white rounded-[3rem] p-10 md:p-14 shadow-2xl">
+              <form onSubmit={handleSubmit} className="space-y-8">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-slate-400 ml-2">Nome Completo</label>
+                    <input 
+                      required
+                      type="text" 
+                      placeholder="Como deseja ser chamado?"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all text-lg font-medium"
+                      value={formData.name}
+                      onChange={e => setFormData({...formData, name: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-slate-400 ml-2">WhatsApp / Telefone</label>
+                    <input 
+                      required
+                      type="tel" 
+                      placeholder="(15) 00000-0000"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all text-lg font-medium"
+                      value={formData.phone}
+                      onChange={e => setFormData({...formData, phone: e.target.value})}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase tracking-[0.2em] font-bold text-slate-400 ml-2">Data Preferencial</label>
+                      <input 
+                        required
+                        type="date" 
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all text-lg font-medium"
+                        value={formData.date}
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={e => setFormData({...formData, date: e.target.value})}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase tracking-[0.2em] font-bold text-slate-400 ml-2">Horário</label>
+                      <input 
+                        required
+                        type="time" 
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all text-lg font-medium"
+                        value={formData.time}
+                        onChange={e => setFormData({...formData, time: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-slate-400 ml-2">Solicitações Especiais</label>
+                    <textarea 
+                      rows={4}
+                      placeholder="Deseja algum foco específico durante a visita?"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all text-lg font-medium resize-none"
+                      value={formData.message}
+                      onChange={e => setFormData({...formData, message: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  disabled={status === 'loading'}
+                  type="submit" 
+                  className="w-full btn-primary py-5 text-xl flex items-center justify-center space-x-3 shadow-xl"
+                >
+                  {status === 'loading' ? (
+                    'Processando Agendamento...'
+                  ) : (
+                    <>
+                      <Calendar size={24} />
+                      <span>Solicitar Agendamento VIP</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-center text-slate-400 text-sm">
+                  Um especialista da Corretora Elias confirmará o horário via WhatsApp.
+                </p>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 function AdminPortal({ 
   properties, 
   onAddProperty, 
@@ -270,7 +492,6 @@ function AdminPortal({
     onAddProperty(newProperty);
     
     // WhatsApp Notification Trigger
-    const ownerPhone = '5515981504714';
     const message = `*Novo Imóvel Anunciado!*%0A%0A` + 
                     `*Título:* ${newProperty.title}%0A` +
                     `*Tipo:* ${newProperty.type}%0A` +
@@ -279,7 +500,7 @@ function AdminPortal({
                     `*Área:* ${newProperty.area}%0A%0A` +
                     `_Enviado via Portal Corretora Elias_`;
     
-    window.open(`https://wa.me/${ownerPhone}?text=${message}`, '_blank');
+    window.open(`https://wa.me/${BROKER_PHONE}?text=${message}`, '_blank');
 
     setShowAddForm(false);
     setNewProperty({
@@ -325,22 +546,6 @@ function AdminPortal({
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar space-y-10">
-        {!auth.currentUser?.emailVerified && auth.currentUser?.providerId === 'firebase' && (
-          <div className="bg-amber-500/10 border border-amber-500/20 p-6 rounded-3xl flex items-center gap-4 text-amber-500">
-            <Clock size={24} />
-            <div className="flex-1">
-              <p className="font-bold">E-mail não verificado</p>
-              <p className="text-sm opacity-80">Por favor, verifique seu e-mail para ativar todas as funcionalidades do portal.</p>
-            </div>
-            <button 
-              onClick={() => auth.currentUser && sendEmailVerification(auth.currentUser)}
-              className="bg-amber-500 text-brand-dark px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-amber-400 transition-colors"
-            >
-              Reenviar Link
-            </button>
-          </div>
-        )}
-        
         {/* Stats Summary */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           {[
@@ -552,189 +757,16 @@ function AdminPortal({
   );
 }
 
-function AuthModal({ 
-  onClose 
-}: { 
-  onClose: () => void 
-}) {
-  const [isRegister, setIsRegister] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [verificationSent, setVerificationSent] = useState(false);
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
 
-    try {
-      if (isRegister) {
-        try {
-          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-          await updateProfile(userCredential.user, { displayName: name });
-          await sendEmailVerification(userCredential.user);
-          setVerificationSent(true);
-        } catch (err: any) {
-          if (err.code === 'auth/email-already-in-use') {
-            // Se já existe, tentamos logar para ver se está verificado
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            if (!userCredential.user.emailVerified) {
-              await sendEmailVerification(userCredential.user);
-              setVerificationSent(true);
-            } else {
-              setError('Este e-mail já está cadastrado e verificado. Por favor, faça login.');
-              setIsRegister(false);
-            }
-          } else {
-            throw err;
-          }
-        }
-      } else {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        if (!userCredential.user.emailVerified) {
-          setVerificationSent(true);
-        } else {
-          onClose();
-        }
-      }
-    } catch (err: any) {
-      if (err.code === 'auth/network-request-failed') {
-        setError('Erro de conexão. Verifique sua internet ou desative bloqueadores de anúncios (AdBlock) e tente novamente.');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setError('O login por e-mail ainda não está ativado. Ative "Email/Password" no console do Firebase.');
-      } else if (err.code === 'auth/api-key-not-valid' || err.message?.includes('api-key-not-valid')) {
-        setError('Chave de API do Firebase inválida. Verifique se as configurações em /src/lib/firebase.ts estão corretas e se as variáveis de ambiente foram salvas sem aspas.');
-      } else {
-        setError(err.message || 'Ocorreu um erro. Tente novamente.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResend = async () => {
-    if (auth.currentUser) {
-      setLoading(true);
-      try {
-        await sendEmailVerification(auth.currentUser);
-        alert('Link de verificação reenviado!');
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
-  if (verificationSent) {
-    return (
-      <motion.div 
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-        className="fixed inset-0 z-[110] bg-brand-dark/95 backdrop-blur-xl flex items-center justify-center p-6"
-      >
-        <div className="bg-white rounded-[3rem] p-12 max-w-md w-full text-center space-y-6">
-          <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
-            <Mail size={40} />
-          </div>
-          <h2 className="text-3xl font-bold">Verifique seu e-mail</h2>
-          <p className="text-slate-600 italic">Enviamos um link de confirmação para <strong>{email}</strong>. Por favor, confirme para poder anunciar seu imóvel.</p>
-          <div className="space-y-4">
-            <button onClick={onClose} className="btn-primary w-full py-4 text-lg">Entendi</button>
-            <button 
-              onClick={handleResend}
-              disabled={loading}
-              className="text-brand-orange font-bold hover:underline py-2 block w-full text-sm uppercase tracking-widest disabled:opacity-50"
-            >
-              Não recebeu? Reenviar link
-            </button>
-          </div>
-        </div>
-      </motion.div>
-    );
-  }
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-      className="fixed inset-0 z-[110] bg-brand-dark/95 backdrop-blur-xl flex items-center justify-center p-6 overflow-y-auto"
-    >
-      <div className="bg-white rounded-[3rem] w-full max-w-xl relative overflow-hidden my-auto">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-brand-dark transition-colors"><X size={32} /></button>
-        
-        <div className="p-8 md:p-12 space-y-10">
-          <div className="text-center">
-            <h2 className="text-4xl font-bold mb-2">{isRegister ? 'Anunciar meu Imóvel' : 'Acesso ao Portal'}</h2>
-            <p className="text-slate-500 italic">Cadastre-se para gerenciar seus ativos de alto padrão.</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {isRegister && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Nome Completo</label>
-                  <input required type="text" placeholder="João Silva" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange" value={name} onChange={e => setName(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Telefone</label>
-                  <input required type="tel" placeholder="(15) 99999-9999" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange" value={phone} onChange={e => setPhone(e.target.value)} />
-                </div>
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">E-mail</label>
-              <input required type="email" placeholder="seu@email.com" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange" value={email} onChange={e => setEmail(e.target.value)} />
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Senha</label>
-              <input required type="password" placeholder="••••••••" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange" value={password} onChange={e => setPassword(e.target.value)} />
-            </div>
-
-            {error && <p className="text-red-500 text-sm font-medium text-center">{error}</p>}
-
-            <button disabled={loading} className="w-full btn-primary py-5 text-xl flex items-center justify-center space-x-3 disabled:opacity-50 shadow-xl overflow-hidden relative">
-              {loading ? <Loader2 className="animate-spin" /> : <span>{isRegister ? 'Solicitar Cadastro' : 'Entrar no Portal'}</span>}
-            </button>
-          </form>
-
-          <div className="text-center pt-6 border-t border-slate-100">
-            <button onClick={() => setIsRegister(!isRegister)} className="text-slate-500 font-medium hover:text-brand-orange transition-colors">
-              {isRegister ? 'Já tenho cadastro? Entrar agora' : 'Não tenho conta? Cadastrar imóvel'}
-            </button>
-            <div className="mt-8 pt-8 flex flex-col items-center">
-              <span className="text-[10px] uppercase font-bold text-slate-400 mb-4 tracking-[0.2em]">ou acesse com</span>
-              <button 
-                onClick={async () => {
-                  try {
-                    await signInWithPopup(auth, googleProvider);
-                    onClose();
-                  } catch (e) {}
-                }}
-                className="flex items-center space-x-3 bg-white border border-slate-200 px-8 py-3 rounded-2xl hover:border-brand-orange transition-all font-bold shadow-sm"
-              >
-                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" />
-                <span>Google</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function PropertyCard({ property }: { property: Property }) {
+function PropertyCard({ property, onSelect }: { property: Property; onSelect: (p: Property) => void }) {
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      className="bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 group border border-slate-100"
+      onClick={() => onSelect(property)}
+      className="bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 group border border-slate-100 cursor-pointer"
     >
       <div className="relative h-64 overflow-hidden">
         <img 
@@ -780,7 +812,10 @@ function PropertyCard({ property }: { property: Property }) {
               {property.area}
             </div>
           </div>
-          <button className="text-brand-dark hover:text-brand-orange font-semibold text-sm flex items-center transition-colors">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onSelect(property); }}
+            className="text-brand-dark hover:text-brand-orange font-semibold text-sm flex items-center transition-colors"
+          >
             Detalhes <ChevronRight size={16} />
           </button>
         </div>
@@ -806,6 +841,34 @@ function PropertyMap({ properties }: { properties: Property[] }) {
     return null;
   }
 
+  // Component to provide manual recenter control
+  function RecenterControl({ properties }: { properties: Property[] }) {
+    const map = useMap();
+    
+    const handleRecenter = () => {
+      if (properties.length > 0) {
+        const bounds = L.latLngBounds(properties.map(p => p.coords));
+        map.fitBounds(bounds, { padding: [50, 50], animate: true });
+      }
+    };
+
+    return (
+      <div className="leaflet-top leaflet-right mt-16 mr-3">
+        <div className="leaflet-control">
+          <button
+            type="button"
+            onClick={handleRecenter}
+            title="Recentrar Mapa"
+            className="flex items-center justify-center bg-white text-brand-dark hover:text-brand-orange w-10 h-10 rounded-xl shadow-lg border border-slate-200 transition-all hover:scale-110 active:scale-95"
+            style={{ pointerEvents: 'auto' }}
+          >
+            <Maximize size={20} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <MapContainer 
       center={defaultCenter} 
@@ -818,6 +881,7 @@ function PropertyMap({ properties }: { properties: Property[] }) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <MapAutoBounds properties={properties} />
+      <RecenterControl properties={properties} />
       {properties.map(property => (
         <Marker key={property.id} position={property.coords}>
           <Popup className="property-popup">
@@ -864,7 +928,26 @@ function ContactForm() {
         interest: formData.interest,
         message: formData.message
       });
+
+      // WhatsApp Notification (Background/Server-side simulation)
+      // Nota: Para enviar WhatsApp em background sem abrir nova aba, você precisará de uma API oficial ou bridge.
+      // Vou deixar o código preparado para quando você tiver um Webhook ou API.
+      
+      /* 
+      const WHATSAPP_API_URL = import.meta.env.VITE_WHATSAPP_API_URL;
+      if (WHATSAPP_API_URL) {
+        await fetch(WHATSAPP_API_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            to: BROKER_PHONE,
+            message: `Novo Lead: ${formData.name} - ${formData.phone}`
+          })
+        });
+      }
+      */
+
       setStatus('success');
+      // window.open removido a pedido para não redirecionar o usuário
     } catch (error) {
       console.error('Erro ao salvar lead no Firestore:', error);
       setStatus('error');
@@ -991,9 +1074,43 @@ export default function App() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [selectedPropertyForVisit, setSelectedPropertyForVisit] = useState<Property | null>(null);
+  const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        const adminStatus = await checkIfAdmin(user);
+        setIsAuthorized(adminStatus);
+      } else {
+        setIsAuthorized(false);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handlePropertyRegistrationClick = async (e: React.MouseEvent) => {
+    if (isAuthorized) {
+      e.preventDefault();
+      setIsAdminOpen(true);
+    } else if (!currentUser) {
+      // If not logged in at all, try logging in
+      try {
+        const result = await loginWithGoogle();
+        const adminStatus = await checkIfAdmin(result.user);
+        setIsAuthorized(adminStatus);
+        if (adminStatus) {
+           e.preventDefault();
+           setIsAdminOpen(true);
+        }
+      } catch (err) {
+        console.error("Login Error:", err);
+      }
+    }
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'Todas' | 'Casas' | 'Apartamentos' | 'Terrenos'>('Todas');
   const [minPrice, setMinPrice] = useState<number | ''>('');
@@ -1074,31 +1191,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error("Login bias error:", error);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setIsAdminOpen(false);
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
-  };
-
-  useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 50);
     };
@@ -1108,13 +1200,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 selection:bg-brand-orange selection:text-white">
-      {/* --- Auth Modal Overlay --- */}
+      {/* --- Schedule Visit Modal --- */}
       <AnimatePresence>
-        {isAuthModalOpen && (
-          <AuthModal onClose={() => setIsAuthModalOpen(false)} />
+        {isVisitModalOpen && selectedPropertyForVisit && (
+          <VisitRegistrationOverlay 
+            property={selectedPropertyForVisit}
+            onClose={() => {
+              setIsVisitModalOpen(false);
+              setSelectedPropertyForVisit(null);
+            }}
+          />
         )}
       </AnimatePresence>
-      
+
       {/* --- Admin Portal Overlay --- */}
       <AnimatePresence>
         {isAdminOpen && (
@@ -1127,17 +1225,21 @@ export default function App() {
         )}
       </AnimatePresence>
       {/* --- Floating Action Button --- */}
-      <a 
-        href="https://wa.me/5500000000000" 
+      <motion.a 
+        href={`https://wa.me/${BROKER_PHONE}?text=${encodeURIComponent('Olá! Gostaria de falar sobre os imóveis da Corretora Elias.')}`}
         target="_blank" 
         rel="noopener noreferrer"
-        className="fixed bottom-8 right-8 z-50 bg-green-500 text-white p-4 rounded-full shadow-2xl hover:scale-110 transition-transform active:scale-95 group"
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        className="fixed bottom-8 right-8 z-50 bg-green-500 text-white p-4 rounded-full shadow-2xl hover:bg-green-600 transition-colors flex items-center justify-center group"
       >
         <MessageCircle size={32} />
         <span className="absolute right-full mr-4 bg-white text-brand-dark px-4 py-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap text-sm font-bold border border-slate-100 pointer-events-none">
           Fale conosco agora!
         </span>
-      </a>
+      </motion.a>
 
       {/* --- Navbar --- */}
       <nav className={`fixed top-0 left-0 w-full z-40 transition-all duration-500 ${isScrolled ? 'py-4 glass' : 'py-6 bg-transparent'}`}>
@@ -1157,46 +1259,38 @@ export default function App() {
             <a href="#properties" className="hover:text-brand-orange transition-colors">Propriedades</a>
             <a href="#team" className="hover:text-brand-orange transition-colors">Corretores</a>
             
-            {!isAuthLoading && (
-              user ? (
-                <div className="flex items-center space-x-6">
-                  <button 
-                    onClick={() => setIsAdminOpen(true)}
-                    className="flex items-center space-x-2 text-brand-orange font-bold uppercase tracking-widest text-[10px] hover:scale-105 transition-transform"
-                  >
-                    <Settings size={14} />
-                    <span>Portal Proprietário</span>
-                  </button>
-                  <button 
-                    onClick={handleLogout}
-                    className="text-[10px] uppercase tracking-widest font-bold opacity-60 hover:opacity-100 transition-opacity"
-                  >
-                    Sair
-                  </button>
-                </div>
+              {isAuthorized ? (
+                <button 
+                  onClick={() => setIsAdminOpen(true)}
+                  className="text-brand-orange font-bold uppercase tracking-widest text-[10px] hover:scale-105 transition-transform flex items-center gap-2"
+                >
+                  <Plus size={14} />
+                  Gerenciar Imóveis
+                </button>
               ) : (
-                <div className="flex items-center space-x-8">
-                  <button 
-                    onClick={() => setIsAuthModalOpen(true)}
-                    className="flex items-center space-x-2 text-brand-orange font-bold uppercase tracking-widest text-[10px] hover:scale-105 transition-transform underline underline-offset-4"
-                  >
-                    <Plus size={14} />
-                    <span>Anunciar seu Imóvel</span>
-                  </button>
-                  <button 
-                    onClick={() => setIsAuthModalOpen(true)}
-                    className="flex items-center space-x-2 text-white/60 hover:text-white font-bold uppercase tracking-widest text-[10px] transition-colors"
-                  >
-                    <Settings size={14} />
-                    <span>Acesso Restrito</span>
-                  </button>
-                </div>
-              )
-            )}
+                <a 
+                  href="#contact" 
+                  onClick={handlePropertyRegistrationClick}
+                  className="text-brand-orange font-bold uppercase tracking-widest text-[10px] hover:scale-105 transition-transform flex items-center gap-2"
+                >
+                  <Plus size={14} />
+                  Anunciar meu Imóvel
+                </a>
+              )}
             
-            <button className="btn-primary flex items-center">
+            <a href="#contact" className="btn-primary flex items-center">
               Fale Conosco
-            </button>
+            </a>
+            
+            {currentUser && (
+              <button 
+                onClick={logout}
+                className={`ml-4 p-2 rounded-full hover:bg-red-500/10 transition-colors ${isScrolled ? 'text-red-500' : 'text-red-400'}`}
+                title="Sair"
+              >
+                <X size={20} />
+              </button>
+            )}
           </div>
 
           {/* Mobile Menu Toggle */}
@@ -1230,42 +1324,32 @@ export default function App() {
               <a href="#properties" onClick={() => setMobileMenuOpen(false)} className="hover:translate-x-4 transition-transform inline-block">Propriedades</a>
               <a href="#team" onClick={() => setMobileMenuOpen(false)} className="hover:translate-x-4 transition-transform inline-block">Corretores</a>
               
-              {!isAuthLoading && (
-                user ? (
-                  <>
-                    <button 
-                      onClick={() => { setIsAdminOpen(true); setMobileMenuOpen(false); }}
-                      className="text-left hover:translate-x-4 transition-transform inline-block text-brand-orange"
-                    >
-                      Portal Proprietário
-                    </button>
-                    <button 
-                      onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
-                      className="text-left text-sm uppercase font-bold text-white/40"
-                    >
-                      Sair
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button 
-                      onClick={() => { setIsAuthModalOpen(true); setMobileMenuOpen(false); }}
-                      className="text-left hover:translate-x-4 transition-transform inline-block text-brand-orange"
-                    >
-                      Anunciar seu Imóvel
-                    </button>
-                    <button 
-                      onClick={() => { setIsAuthModalOpen(true); setMobileMenuOpen(false); }}
-                      className="text-left hover:translate-x-4 transition-transform inline-block text-white/40"
-                    >
-                      Acesso Restrito
-                    </button>
-                  </>
-                )
+              {isAuthorized ? (
+                <button 
+                  onClick={() => { setIsAdminOpen(true); setMobileMenuOpen(false); }} 
+                  className="hover:translate-x-4 transition-transform inline-block text-brand-orange text-left"
+                >
+                  Gerenciar Imóveis
+                </button>
+              ) : (
+                <button 
+                  onClick={(e) => { handlePropertyRegistrationClick(e); setMobileMenuOpen(false); }} 
+                  className="hover:translate-x-4 transition-transform inline-block text-brand-orange text-left"
+                >
+                  Anunciar meu Imóvel
+                </button>
               )}
             </div>
+            {currentUser && (
+               <button 
+                 onClick={() => { logout(); setMobileMenuOpen(false); }}
+                 className="mt-8 text-red-400 text-xl font-medium text-left hover:text-red-300 transition-colors flex items-center gap-2"
+               >
+                 <X size={20} /> Sair
+               </button>
+            )}
             <div className="mt-auto">
-              <button className="w-full btn-primary text-xl">Fale Conosco</button>
+              <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="w-full btn-primary text-xl block text-center">Fale Conosco</a>
             </div>
           </motion.div>
         )}
@@ -1300,12 +1384,13 @@ export default function App() {
               </p>
               <div className="flex space-x-6 mb-12">
                 <a href="#properties" className="btn-primary px-8 py-4">Ver Imóveis</a>
-                <button 
-                  onClick={() => setIsAuthModalOpen(true)}
-                  className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-8 py-4 rounded-full font-bold transition-all border border-white/20"
+                <a 
+                  href="#contact"
+                  onClick={handlePropertyRegistrationClick}
+                  className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-8 py-4 rounded-full font-bold transition-all border border-white/20 flex items-center justify-center"
                 >
-                  Anunciar meu Imóvel
-                </button>
+                  {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
+                </a>
               </div>
             </motion.div>
 
@@ -1540,7 +1625,13 @@ export default function App() {
             {filteredProperties.length > 0 ? (
               filteredProperties.map(property => (
                 <div key={property.id}>
-                  <PropertyCard property={property} />
+                  <PropertyCard 
+                    property={property} 
+                    onSelect={(p) => {
+                      setSelectedPropertyForVisit(p);
+                      setIsVisitModalOpen(true);
+                    }}
+                  />
                 </div>
               ))
             ) : (
@@ -1584,12 +1675,13 @@ export default function App() {
               Agende agora uma consultoria personalizada com um de nossos corretores especialistas em alto padrão.
             </p>
             <div className="flex flex-col md:flex-row gap-6 justify-center">
-              <button 
-                onClick={() => setIsAuthModalOpen(true)}
+              <a 
+                href="#contact"
+                onClick={handlePropertyRegistrationClick}
                 className="btn-primary text-xl px-12 py-5 shadow-orange-500/10"
               >
-                Anunciar meu Imóvel
-              </button>
+                {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
+              </a>
               <button className="bg-transparent border-2 border-white/30 text-white hover:border-white transition-colors px-12 py-5 rounded-full font-bold text-xl">
                 Baixar Catálogo PDF
               </button>
@@ -1713,7 +1805,7 @@ export default function App() {
       </section>
 
       {/* --- CRM Contact Section --- */}
-      <section className="py-24 bg-slate-50 relative overflow-hidden">
+      <section id="contact" className="py-24 bg-slate-50 relative overflow-hidden">
         <div className="container mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div>
@@ -1843,7 +1935,7 @@ export default function App() {
       </section>
 
       {/* --- Contact & Footer --- */}
-      <footer id="contact" className="bg-brand-dark pt-24 pb-12 text-white/90">
+      <footer className="bg-brand-dark pt-24 pb-12 text-white/90">
         <div className="container mx-auto px-6">
           <div className="grid lg:grid-cols-4 gap-16 mb-20">
             {/* Brand Info */}
@@ -1924,6 +2016,13 @@ export default function App() {
               © 2026 Corretora Elias Imóveis de Luxo. Todos os direitos reservados.
             </p>
             <div className="flex items-center space-x-4 text-xs font-bold uppercase tracking-widest text-white/40">
+              <button 
+                onClick={handlePropertyRegistrationClick}
+                className="hover:text-brand-orange transition-colors"
+              >
+                {isAuthorized ? 'Painel do Corretor' : 'Área Restrita'}
+              </button>
+              <span className="w-1 h-1 bg-white/40 rounded-full" />
               <span>CNPJ: 00.000.000/0000-00</span>
               <span className="w-1 h-1 bg-white/40 rounded-full" />
               <span>CRECI: 000.000-J</span>
