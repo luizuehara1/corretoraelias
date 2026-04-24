@@ -24,6 +24,8 @@ import {
   DollarSign,
   Info,
   ChevronRight,
+  ChevronLeft,
+  Play,
   ArrowRight,
   Send,
   Loader2,
@@ -38,7 +40,8 @@ import {
   Shield,
   Camera,
   Upload,
-  ImagePlus
+  ImagePlus,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -71,8 +74,12 @@ import {
   subscribeToBlockedSlots,
   subscribeToProperties,
   toggleFavorite,
-  subscribeToFavorites
+  subscribeToFavorites,
+  updateVisitStatus,
+  deleteVisit
 } from './lib/firebase';
+import { exportReportToPDF } from './lib/pdfExport';
+import { sendVisitConfirmationNotification } from './services/notificationService';
 
 // --- Config ---
 const BROKER_PHONE = '5515981504714';
@@ -111,6 +118,7 @@ interface Property {
   price: string;
   category: 'Residencial' | 'Comercial' | 'Rural';
   type: string;
+  propertyType: string;
   beds?: number; // Quartos
   suites?: number;
   baths?: number; // Banheiros
@@ -125,6 +133,7 @@ interface Property {
   priceValue: number;
   coords: [number, number];
   status: 'ativo' | 'inativo' | 'vendido';
+  videoUrl?: string; // URL do vídeo (YouTube/Vimeo)
 }
 
 interface Testimonial {
@@ -208,6 +217,20 @@ const formatCurrency = (value: number | "") => {
     currency: "BRL",
     maximumFractionDigits: 0,
   }).format(value);
+};
+
+const getVideoEmbedUrl = (url?: string) => {
+  if (!url) return null;
+  
+  // YouTube
+  const ytMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+  
+  // Vimeo
+  const vimeoMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:vimeo\.com\/)([0-9]+)/);
+  if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+  
+  return null;
 };
 
 // --- Components ---
@@ -499,7 +522,7 @@ function VisitRegistrationOverlay({
                   <button 
                     disabled={status === 'loading' || !formData.time}
                     type="submit" 
-                    className="w-full btn-primary !py-6 !rounded-[2rem] text-xl flex items-center justify-center space-x-4 shadow-[0_20px_40px_rgba(255,92,0,0.3)] group/btn disabled:opacity-50 disabled:grayscale transition-all"
+                    className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 !py-6 !rounded-[2rem] text-xl flex items-center justify-center space-x-4 shadow-[0_20px_40px_rgba(255,92,0,0.3)] group/btn disabled:opacity-50 disabled:grayscale transition-all duration-300"
                   >
                     {status === 'loading' ? (
                       <span className="flex items-center gap-3">
@@ -531,6 +554,22 @@ function VisitRegistrationOverlay({
 }
 
 function PropertyDetailModal({ property, onClose }: { property: Property; onClose: () => void }) {
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
+  
+  const mediaItems = [
+    { type: 'image', url: property.image },
+    ...(property.additionalImages || []).map(url => ({ type: 'image', url })),
+    ...(property.videoUrl ? [{ type: 'video', url: property.videoUrl }] : [])
+  ];
+
+  const nextMedia = () => {
+    setCurrentMediaIndex((prev) => (prev + 1) % mediaItems.length);
+  };
+
+  const prevMedia = () => {
+    setCurrentMediaIndex((prev) => (prev - 1 + mediaItems.length) % mediaItems.length);
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -559,18 +598,87 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
 
         <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-12">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-20">
-            {/* Gallery Section */}
+            {/* Gallery Carousel Section */}
             <div className="space-y-6">
-              <div className="rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3]">
-                <img src={property.image} className="w-full h-full object-cover" alt={property.title} referrerPolicy="no-referrer" />
+              <div className="relative group rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3] bg-white/5">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentMediaIndex}
+                    initial={{ opacity: 0, scale: 1.1 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ duration: 0.5, ease: "circOut" }}
+                    className="w-full h-full"
+                  >
+                    {mediaItems[currentMediaIndex].type === 'image' ? (
+                      <img 
+                        src={mediaItems[currentMediaIndex].url} 
+                        className="w-full h-full object-cover" 
+                        alt={property.title} 
+                        referrerPolicy="no-referrer" 
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-black">
+                        <iframe
+                          width="100%"
+                          height="100%"
+                          src={getVideoEmbedUrl(mediaItems[currentMediaIndex].url) || ''}
+                          title="Vídeo do Imóvel"
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          className="w-full h-full"
+                        ></iframe>
+                      </div>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+
+                {/* Navigation Arrows */}
+                {mediaItems.length > 1 && (
+                  <>
+                    <button 
+                      onClick={prevMedia}
+                      className="absolute left-6 top-1/2 -translate-y-1/2 w-14 h-14 bg-black/50 backdrop-blur-xl border border-white/10 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-brand-orange hover:border-brand-orange hover:scale-110 active:scale-95"
+                    >
+                      <ChevronLeft size={32} />
+                    </button>
+                    <button 
+                      onClick={nextMedia}
+                      className="absolute right-6 top-1/2 -translate-y-1/2 w-14 h-14 bg-black/50 backdrop-blur-xl border border-white/10 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:bg-brand-orange hover:border-brand-orange hover:scale-110 active:scale-95"
+                    >
+                      <ChevronRight size={32} />
+                    </button>
+                    
+                    {/* Counter Overlay */}
+                    <div className="absolute top-6 right-6 bg-black/50 backdrop-blur-xl border border-white/10 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest text-white/70">
+                      {currentMediaIndex + 1} / {mediaItems.length}
+                    </div>
+                  </>
+                )}
               </div>
               
-              {property.additionalImages && property.additionalImages.length > 0 && (
-                <div className="grid grid-cols-3 gap-4">
-                  {property.additionalImages.map((img, idx) => (
-                    <div key={idx} className="aspect-square rounded-2xl overflow-hidden border border-white/5 hover:border-brand-orange/50 transition-all cursor-pointer">
-                      <img src={img} className="w-full h-full object-cover" alt={`${property.title} ${idx + 2}`} referrerPolicy="no-referrer" />
-                    </div>
+              {/* Thumbnails / Indicators */}
+              {mediaItems.length > 1 && (
+                <div className="flex flex-wrap gap-3 justify-center">
+                  {mediaItems.map((item, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setCurrentMediaIndex(idx)}
+                      className={`relative w-20 aspect-video rounded-xl overflow-hidden border-2 transition-all ${
+                        currentMediaIndex === idx 
+                          ? 'border-brand-orange scale-105 shadow-[0_0_20px_rgba(255,92,0,0.3)]' 
+                          : 'border-white/5 opacity-40 hover:opacity-100 hover:border-white/20'
+                      }`}
+                    >
+                      {item.type === 'image' ? (
+                        <img src={item.url} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="w-full h-full bg-slate-900 flex items-center justify-center">
+                          <Play size={16} className="text-brand-orange" />
+                        </div>
+                      )}
+                    </button>
                   ))}
                 </div>
               )}
@@ -582,6 +690,10 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
                 <div className="flex items-center space-x-3 text-brand-orange font-black uppercase tracking-widest text-xs">
                   <span className="bg-brand-orange/10 border border-brand-orange/20 px-3 py-1 rounded-full">{property.purpose}</span>
                   <span className="bg-white/10 border border-white/10 px-3 py-1 rounded-full">{property.category}</span>
+                  {property.propertyType && (
+                    <span className="bg-white/10 border border-white/10 px-3 py-1 rounded-full">{property.propertyType}</span>
+                  )}
+                  <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-full opacity-60 italic">{property.type}</span>
                 </div>
                 <h3 className="text-4xl md:text-5xl font-black tracking-tighter leading-none">{property.title}</h3>
                 <div className="flex items-center text-white/40 font-bold uppercase tracking-widest text-xs">
@@ -615,7 +727,7 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
                   <p className="text-white/70 leading-relaxed text-sm whitespace-pre-wrap">{property.description}</p>
                 </div>
               )}
-
+              
               <div className="space-y-6">
                 <h4 className="text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Valores e Condições</h4>
                 <div className="flex items-end gap-4">
@@ -656,6 +768,263 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
   );
 }
 
+function PDFCalendar({ year, month, highlightedDays = [] }: { year: number, month: number, highlightedDays: string[] }) {
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const weekDays = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'];
+
+  return (
+    <div className="mt-8 border border-slate-100 rounded-3xl overflow-hidden bg-white">
+      <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex justify-between items-center">
+        <h5 className="text-[10px] font-black text-brand-dark uppercase tracking-widest">Mapa de Atividade</h5>
+        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em]">{new Date(year, month).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}</span>
+      </div>
+      <div className="grid grid-cols-7 gap-px bg-slate-100 p-px">
+        {weekDays.map(d => (
+          <div key={d} className="bg-white p-2 text-center" style={{ backgroundColor: '#ffffff' }}>
+            <span className="text-[7px] font-black text-slate-400">{d}</span>
+          </div>
+        ))}
+        {Array.from({ length: firstDay }).map((_, i) => (
+          <div key={`empty-${i}`} className="bg-white aspect-square" style={{ backgroundColor: '#ffffff' }}></div>
+        ))}
+        {days.map(d => {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const isHighlighted = highlightedDays.includes(dateStr);
+          return (
+            <div key={d} className="bg-white aspect-square p-1 flex flex-col items-center justify-center" style={{ backgroundColor: '#ffffff' }}>
+              <span className={`text-[9px] font-bold ${isHighlighted ? 'text-brand-orange' : 'text-slate-400'}`} style={{ color: isHighlighted ? '#FF5C00' : '#CBD4E1' }}>{d}</span>
+              {isHighlighted && <div className="w-1 h-1 bg-brand-orange rounded-full mt-0.5" style={{ backgroundColor: '#FF5C00' }}></div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MonthlyReportModal({ 
+  visits, 
+  properties,
+  onClose 
+}: { 
+  visits: any[], 
+  properties: Property[] | any, // Handle potential type mismatch if needed
+  onClose: () => void 
+}) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  const stats = useMemo(() => {
+    const monthVisits = visits.filter(v => {
+      if (!v.date) return false;
+      const d = new Date(v.date);
+      return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
+    });
+
+    const houseFrequency: { [key: string]: { count: number, title: string, id: string } } = {};
+    monthVisits.forEach(v => {
+      const prop = properties.find(p => p.id === String(v.propertyId));
+      const propId = String(v.propertyId);
+      if (!houseFrequency[propId]) {
+        houseFrequency[propId] = { count: 0, title: prop?.title || 'Imóvel Desconhecido', id: propId };
+      }
+      houseFrequency[propId].count++;
+    });
+
+    const topHouses = Object.values(houseFrequency).sort((a, b) => b.count - a.count);
+
+    return {
+      total: monthVisits.length,
+      confirmed: monthVisits.filter(v => v.status === 'confirmed').length,
+      pending: monthVisits.filter(v => v.status === 'pending').length,
+      cancelled: monthVisits.filter(v => v.status === 'cancelled').length,
+      monthVisits: monthVisits.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+      topHouses,
+      monthName: new Date(selectedYear, selectedMonth).toLocaleString('pt-BR', { month: 'long' })
+    };
+  }, [visits, properties, selectedMonth, selectedYear]);
+
+  const months = Array.from({ length: 12 }, (_, i) => i);
+  const years = [new Date().getFullYear(), new Date().getFullYear() - 1];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[110] bg-brand-dark/90 backdrop-blur-md flex items-center justify-center p-4"
+    >
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white rounded-[3rem] w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+      >
+        <div className="p-8 md:p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div>
+            <h3 className="text-2xl font-black text-brand-dark uppercase tracking-tight">Painel de Performance</h3>
+            <div className="flex items-center gap-4 mt-2">
+              <select 
+                value={selectedMonth} 
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-brand-dark outline-none focus:border-brand-orange"
+              >
+                {months.map(m => (
+                  <option key={m} value={m}>
+                    {new Date(2000, m).toLocaleString('pt-BR', { month: 'long' })}
+                  </option>
+                ))}
+              </select>
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="bg-white border border-slate-200 rounded-lg px-3 py-1 text-sm font-bold text-brand-dark outline-none focus:border-brand-orange"
+              >
+                {years.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 bg-white hover:bg-slate-100 rounded-full flex items-center justify-center transition-colors shadow-sm">
+            <X size={20} className="text-slate-500" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-8 md:p-10 no-scrollbar space-y-10">
+          <div id="report-content" className="bg-white p-6 rounded-3xl" style={{ backgroundColor: '#ffffff' }}>
+            <div className="mb-10 text-center pb-8 border-b border-slate-50">
+               <h4 className="text-brand-orange font-black text-3xl uppercase tracking-tighter">Relatório Estratégico</h4>
+               <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px] mt-2">RB Sorocaba Negócios Imobiliários • {stats.monthName} {selectedYear}</p>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+              <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#F1F5F9' }}>
+                <p className="text-slate-400 text-[9px] uppercase tracking-widest font-bold mb-1">Carga de Visitas</p>
+                <p className="text-3xl font-black text-brand-dark" style={{ color: '#0F172A' }}>{stats.total}</p>
+              </div>
+              <div className="bg-green-50 p-6 rounded-3xl border border-green-100" style={{ backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' }}>
+                <p className="text-green-600/60 text-[9px] uppercase tracking-widest font-bold mb-1">Efetuadas</p>
+                <p className="text-3xl font-black text-green-600" style={{ color: '#16A34A' }}>{stats.confirmed}</p>
+              </div>
+              <div className="bg-orange-50 p-6 rounded-3xl border border-orange-100" style={{ backgroundColor: '#FFF7ED', borderColor: '#FFEDD5' }}>
+                <p className="text-brand-orange/60 text-[9px] uppercase tracking-widest font-bold mb-1">Aguardando</p>
+                <p className="text-3xl font-black text-brand-orange" style={{ color: '#FF5C00' }}>{stats.pending}</p>
+              </div>
+              <div className="bg-slate-900 p-6 rounded-3xl" style={{ backgroundColor: '#0F172A' }}>
+                <p className="text-white/40 text-[9px] uppercase tracking-widest font-bold mb-1">Aproveitamento</p>
+                <p className="text-3xl font-black text-white" style={{ color: '#FFFFFF' }}>
+                  {stats.total > 0 ? Math.round((stats.confirmed / stats.total) * 100) : 0}%
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-brand-dark uppercase tracking-[0.2em] flex items-center gap-2">
+                  <div className="w-1.5 h-4 bg-brand-orange rounded-full"></div>
+                  Imóveis mais Visitados
+                </h4>
+                <div className="grid gap-3">
+                  {stats.topHouses.length > 0 ? stats.topHouses.map((house, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100" style={{ backgroundColor: '#F8FAFC' }}>
+                      <span className="text-xs font-bold text-slate-700 max-w-[70%] truncate">{house.title}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">vistas</span>
+                        <span className="bg-brand-orange text-white w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shadow-sm shadow-brand-orange/20" style={{ backgroundColor: '#FF5C00' }}>{house.count}</span>
+                      </div>
+                    </div>
+                  )) : (
+                    <p className="text-xs text-slate-400 italic py-4">Nenhuma visita registrada neste período.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-brand-dark uppercase tracking-[0.2em] flex items-center gap-2">
+                   <div className="w-1.5 h-4 bg-brand-orange rounded-full"></div>
+                   Cronograma do Período
+                </h4>
+                
+                <PDFCalendar 
+                  year={selectedYear} 
+                  month={selectedMonth} 
+                  highlightedDays={stats.monthVisits.map(v => v.date)} 
+                />
+
+                <div className="overflow-hidden rounded-2xl border border-slate-100">
+                  <table className="w-full text-left text-[10px]">
+                    <thead className="bg-slate-50 text-slate-400 uppercase tracking-widest font-bold">
+                      <tr>
+                        <th className="px-5 py-4">Data</th>
+                        <th className="px-5 py-4">Cliente / Imóvel</th>
+                        <th className="px-5 py-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {stats.monthVisits.map((v, i) => {
+                        const prop = properties.find(p => p.id === String(v.propertyId));
+                        return (
+                          <tr key={i} className="bg-white">
+                            <td className="px-5 py-4 font-bold text-slate-900">{new Date(v.date).toLocaleDateString('pt-BR')}</td>
+                            <td className="px-5 py-4">
+                              <div className="flex flex-col">
+                                <span className="text-slate-900 font-bold">{v.name}</span>
+                                <span className="text-brand-orange text-[8px] font-black uppercase tracking-widest">{prop?.title || 'Imóvel'}</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-tighter ${
+                                v.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
+                                v.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-brand-orange'
+                              }`}>
+                                {v.status === 'confirmed' ? 'Visita OK' : v.status === 'cancelled' ? 'Cancelada' : 'Pendente'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 italic" style={{ backgroundColor: '#F8FAFC' }}>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Relatório gerado automaticamente p/ Auditoria de Qualidade RB Sorocaba. Foram identificados {stats.total} pontos de contato e {stats.confirmed} apresentações diretas de produto.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-4 pt-4">
+            <button 
+              onClick={async () => {
+                setIsExporting(true);
+                await exportReportToPDF('report-content', `Relatorio-Mensal-${stats.monthName}-${selectedYear}`);
+                setIsExporting(false);
+              }}
+              disabled={isExporting}
+              className="flex-1 bg-slate-100 text-slate-900 py-4 rounded-2xl font-bold uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isExporting ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+              Exportar Plano de Ação
+            </button>
+            <button 
+              onClick={onClose}
+              className="flex-1 bg-brand-dark text-white py-4 rounded-2xl font-bold uppercase tracking-widest hover:bg-brand-orange transition-all"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function AdminPortal({ 
   properties, 
   scheduledVisits = [],
@@ -665,6 +1034,8 @@ function AdminPortal({
   onDeleteProperty, 
   onUnblockSlot,
   onBlockSlot,
+  onUpdateVisitStatus,
+  onDeleteVisit,
   onClose,
   isAuthorized
  }: { 
@@ -676,6 +1047,8 @@ function AdminPortal({
   onDeleteProperty: (id: string | number) => void,
   onUnblockSlot?: (id: string) => Promise<void>,
   onBlockSlot?: (slot: any) => Promise<void>,
+  onUpdateVisitStatus?: (id: string, status: 'pending' | 'confirmed' | 'cancelled') => Promise<void>,
+  onDeleteVisit?: (id: string) => Promise<void>,
   onClose: () => void,
   isAuthorized: boolean
  }) {
@@ -684,11 +1057,17 @@ function AdminPortal({
   const [formStep, setFormStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'submissions' | 'visits'>('inventory');
+  const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [isBlockingSlot, setIsBlockingSlot] = useState(false);
+  const [isExportingAgenda, setIsExportingAgenda] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportEndDate, setExportEndDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+  const [showReport, setShowReport] = useState(false);
   const [viewingProperty, setViewingProperty] = useState<Property | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>(['']);
   const [blockFormData, setBlockFormData] = useState({ date: '', time: '', reason: '' });
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const TIME_SLOTS = [
     '08:00', '09:00', '10:00', '11:00', '12:00', 
@@ -760,6 +1139,7 @@ function AdminPortal({
     priceValue: 0,
     category: 'Residencial',
     type: 'Casa',
+    propertyType: 'Casa',
     beds: 0,
     suites: 0,
     baths: 0,
@@ -771,11 +1151,21 @@ function AdminPortal({
     image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop',
     featured: false,
     coords: [-23.5018, -47.4581],
-    status: 'ativo'
+    status: 'ativo',
+    videoUrl: ''
   });
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    
+    // Validation for priceValue
+    if (newProperty.priceValue <= 0) {
+      setPriceError("O valor numérico do imóvel deve ser maior que zero.");
+      setFormStep(2);
+      return;
+    } else {
+      setPriceError(null);
+    }
     
     if (formStep < 4) {
       setFormStep(formStep + 1);
@@ -831,6 +1221,7 @@ function AdminPortal({
   const resetForm = () => {
     setShowAddForm(false);
     setShowSuccess(false);
+    setPriceError(null);
     setEditingId(null);
     setFormStep(1);
     setImageUrls(['']);
@@ -848,6 +1239,7 @@ function AdminPortal({
       priceValue: 0,
       category: 'Residencial',
       type: 'Casa',
+      propertyType: 'Casa',
       beds: 0,
       suites: 0,
       baths: 0,
@@ -859,13 +1251,15 @@ function AdminPortal({
       image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop',
       coords: [-23.5018, -47.4581],
       status: 'ativo',
-      featured: false
+      featured: false,
+      videoUrl: ''
     });
   };
 
   const handleEdit = (property: Property) => {
     setEditingId(property.id);
     setNewProperty(property);
+    setPriceError(null);
     setImageUrls([property.image, ...(property.additionalImages || [])]);
     setShowAddForm(true);
     setFormStep(1);
@@ -988,13 +1382,57 @@ function AdminPortal({
                 <span>Ver Site Público</span>
               </a>
               {activeTab === 'visits' && (
-                <button 
-                  onClick={() => setIsBlockingSlot(!isBlockingSlot)}
-                  className="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center gap-2"
-                >
-                  <Clock size={18} />
-                  {isBlockingSlot ? 'Fechar Bloqueio' : 'Bloquear Horário'}
-                </button>
+                <div className="flex flex-wrap items-end gap-3 bg-white/5 p-4 rounded-2xl border border-white/10">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest pl-1">Início</span>
+                    <input 
+                      type="date" 
+                      value={exportStartDate} 
+                      onChange={(e) => setExportStartDate(e.target.value)}
+                      className="bg-brand-dark/50 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-brand-orange"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest pl-1">Término</span>
+                    <input 
+                      type="date" 
+                      value={exportEndDate} 
+                      onChange={(e) => setExportEndDate(e.target.value)}
+                      className="bg-brand-dark/50 border border-white/10 rounded-lg px-3 py-2 text-white text-xs outline-none focus:border-brand-orange"
+                    />
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (exportEndDate < exportStartDate) {
+                        alert("A data de término deve ser igual ou posterior à data de início.");
+                        return;
+                      }
+                      setIsExportingAgenda(true);
+                      await exportReportToPDF('agenda-full-report', `Agenda-RB-Sorocaba-${exportStartDate}-a-${exportEndDate}`);
+                      setIsExportingAgenda(false);
+                    }}
+                    disabled={isExportingAgenda || exportEndDate < exportStartDate}
+                    className="bg-brand-orange text-white px-5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 disabled:opacity-50 hover:scale-105 active:scale-95"
+                  >
+                    {isExportingAgenda ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
+                    Exportar
+                  </button>
+                  <div className="w-px h-8 bg-white/10 mx-1 self-center"></div>
+                  <button 
+                    onClick={() => setShowReport(true)}
+                    className="bg-white/10 text-white hover:bg-brand-orange px-5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 h-[34px]"
+                  >
+                    <LayoutDashboard size={14} />
+                    Gestão Mensal
+                  </button>
+                  <button 
+                    onClick={() => setIsBlockingSlot(!isBlockingSlot)}
+                    className="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 h-[34px]"
+                  >
+                    <Clock size={14} />
+                    {isBlockingSlot ? 'Fechar' : 'Bloquear'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1002,6 +1440,13 @@ function AdminPortal({
 
         {/* Block Slot Form */}
         <AnimatePresence>
+          {showReport && (
+            <MonthlyReportModal 
+              visits={scheduledVisits} 
+              properties={properties}
+              onClose={() => setShowReport(false)} 
+            />
+          )}
           {viewingProperty && (
             <PropertyDetailModal 
               property={viewingProperty} 
@@ -1201,8 +1646,15 @@ function AdminPortal({
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Valor Numérico (para filtros)</label>
-                        <input required type="number" placeholder="Ex: 2500000" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange"
-                          value={newProperty.priceValue || ''} onChange={e => setNewProperty({...newProperty, priceValue: Number(e.target.value)})} />
+                        <input required type="number" placeholder="Ex: 2500000" className={`w-full bg-slate-50 border ${priceError ? 'border-red-500' : 'border-slate-100'} rounded-2xl px-6 py-4 outline-none focus:border-brand-orange`}
+                          value={newProperty.priceValue || ''} onChange={e => {
+                            const val = Number(e.target.value);
+                            setNewProperty({...newProperty, priceValue: val});
+                            if (val > 0) setPriceError(null);
+                          }} />
+                        {priceError && (
+                          <p className="text-[10px] text-red-500 font-bold uppercase tracking-wider ml-2">{priceError}</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Valor Condomínio (opcional)</label>
@@ -1226,7 +1678,7 @@ function AdminPortal({
                 {formStep === 3 && (
                   <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                     <h4 className="text-sm font-bold text-slate-900 uppercase tracking-[0.2em] mb-4 border-l-4 border-brand-orange pl-4">Tipo e Localização</h4>
-                    <div className="grid md:grid-cols-3 gap-8">
+                    <div className="grid md:grid-cols-4 gap-8">
                       <div className="md:col-span-2 space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Título do Anúncio</label>
                         <input required type="text" placeholder="Ex: Mansão Alpha Luxury" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange"
@@ -1242,10 +1694,22 @@ function AdminPortal({
                           {Object.keys(PROPERTY_CATEGORIES).map(cat => <option key={cat} value={cat}>{cat}</option>)}
                         </select>
                       </div>
+                      <div className="space-y-2">
+                        <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Tipo de Imóvel</label>
+                        <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 appearance-none outline-none focus:border-brand-orange cursor-pointer"
+                          value={newProperty.propertyType} onChange={e => setNewProperty({...newProperty, propertyType: e.target.value})}>
+                          <option value="Casa">Casa</option>
+                          <option value="Apartamento">Apartamento</option>
+                          <option value="Comercial">Comercial</option>
+                          <option value="Chácara/Sítio">Chácara/Sítio</option>
+                          <option value="Terreno">Terreno</option>
+                          <option value="Outros">Outros</option>
+                        </select>
+                      </div>
                     </div>
                     <div className="grid md:grid-cols-4 gap-8">
                       <div className="space-y-2">
-                        <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Tipo</label>
+                        <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Sub-tipo (Granular)</label>
                         <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 appearance-none outline-none focus:border-brand-orange cursor-pointer"
                           value={newProperty.type} onChange={e => setNewProperty({...newProperty, type: e.target.value})}>
                           {PROPERTY_CATEGORIES[newProperty.category].map(t => <option key={t} value={t}>{t}</option>)}
@@ -1311,6 +1775,20 @@ function AdminPortal({
                         <Plus size={18} />
                         Adicionar mais uma URL
                       </button>
+                    </div>
+
+                    <div className="space-y-4 pt-4 border-t border-slate-100">
+                      <h4 className="text-sm font-bold text-slate-900 uppercase tracking-[0.2em] border-l-4 border-brand-orange pl-4">Vídeo (YouTube / Vimeo)</h4>
+                      <div className="space-y-2">
+                        <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Link do Vídeo (Opcional)</label>
+                        <input 
+                          type="text" 
+                          placeholder="Ex: https://www.youtube.com/watch?v=..." 
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange font-mono text-xs"
+                          value={newProperty.videoUrl || ''} 
+                          onChange={e => setNewProperty({...newProperty, videoUrl: e.target.value})} 
+                        />
+                      </div>
                     </div>
 
                     {imageUrls[0] && (
@@ -1517,9 +1995,64 @@ function AdminPortal({
                                  Remover Bloqueio
                                </button>
                              ) : (
-                               <button className="text-white/20 hover:text-white cursor-not-allowed text-[10px] uppercase font-bold">
-                                 Detalhes
-                               </button>
+                               <div className="flex items-center justify-end space-x-2">
+                                 {statusUpdating === item.id ? (
+                                   <div className="p-2"><Loader2 className="animate-spin text-white/20" size={16} /></div>
+                                 ) : (
+                                   <>
+                                     {item.status !== 'confirmed' && (
+                                       <button 
+                                         onClick={async () => {
+                                           setStatusUpdating(item.id);
+                                           try {
+                                             await onUpdateVisitStatus?.(item.id, 'confirmed');
+                                           } finally {
+                                             setStatusUpdating(null);
+                                           }
+                                         }}
+                                         className="bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white p-2 rounded-lg transition-all"
+                                         title="Confirmar Visita"
+                                       >
+                                         <Check size={16} />
+                                       </button>
+                                     )}
+                                     {item.status === 'confirmed' && (
+                                       <button 
+                                         onClick={async () => {
+                                           setStatusUpdating(item.id);
+                                           try {
+                                             await onUpdateVisitStatus?.(item.id, 'pending');
+                                           } finally {
+                                             setStatusUpdating(null);
+                                           }
+                                         }}
+                                         className="bg-brand-orange/10 text-brand-orange hover:bg-brand-orange hover:text-white p-2 rounded-lg transition-all"
+                                         title="Voltar para Pendente"
+                                       >
+                                         <Clock size={16} />
+                                       </button>
+                                     )}
+                                   </>
+                                 )}
+                                 <button 
+                                   onClick={() => {
+                                     if (confirm("Deseja realmente excluir este agendamento?")) {
+                                       onDeleteVisit && onDeleteVisit(item.id);
+                                     }
+                                   }}
+                                   className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white p-2 rounded-lg transition-all"
+                                   title="Excluir Agendamento"
+                                 >
+                                   <Trash2 size={16} />
+                                 </button>
+                                 <div className="ml-2">
+                                   {item.status === 'confirmed' ? (
+                                     <span className="text-green-500 text-[10px] uppercase font-bold tracking-widest bg-green-500/10 px-2 py-1 rounded">Confirmada</span>
+                                   ) : (
+                                     <span className="text-brand-orange text-[10px] uppercase font-bold tracking-widest bg-brand-orange/10 px-2 py-1 rounded">Pendente</span>
+                                   )}
+                                 </div>
+                               </div>
                              )}
                           </td>
                         </tr>
@@ -1542,6 +2075,95 @@ function AdminPortal({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Hidden Report for PDF Export */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        <div id="agenda-full-report" className="bg-white p-12 w-[800px]" style={{ backgroundColor: '#ffffff' }}>
+          <div className="mb-10 text-center pb-8 border-b border-slate-50">
+             <h4 className="text-brand-orange font-black text-3xl uppercase tracking-tighter">Relatório de Agenda</h4>
+             <p className="text-slate-400 font-bold uppercase tracking-[0.3em] text-[10px] mt-2">RB Sorocaba Negócios Imobiliários • Período: {exportStartDate.split('-').reverse().join('/')} até {exportEndDate.split('-').reverse().join('/')}</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-6 mb-12">
+            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100" style={{ backgroundColor: '#F8FAFC', borderColor: '#F1F5F9' }}>
+              <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold mb-1">Visitas no Período</p>
+              <p className="text-3xl font-black text-brand-dark" style={{ color: '#0F172A' }}>{scheduledVisits.filter(v => v.date >= exportStartDate && v.date <= exportEndDate).length}</p>
+            </div>
+            <div className="bg-green-50 p-6 rounded-3xl border border-green-100" style={{ backgroundColor: '#F0FDF4', borderColor: '#DCFCE7' }}>
+              <p className="text-green-600 text-[10px] uppercase tracking-widest font-bold mb-1">Confirmadas</p>
+              <p className="text-3xl font-black text-green-600" style={{ color: '#16A34A' }}>{scheduledVisits.filter(v => v.date >= exportStartDate && v.date <= exportEndDate && v.status === 'confirmed').length}</p>
+            </div>
+            <div className="bg-red-50 p-6 rounded-3xl border border-red-100" style={{ backgroundColor: '#FEF2F2', borderColor: '#FEE2E2' }}>
+              <p className="text-red-600 text-[10px] uppercase tracking-widest font-bold mb-1">Bloqueios</p>
+              <p className="text-3xl font-black text-red-600" style={{ color: '#DC2626' }}>{blockedSlots.filter(s => s.date >= exportStartDate && s.date <= exportEndDate).length}</p>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <h4 className="text-xs font-black text-brand-dark uppercase tracking-[0.2em] flex items-center gap-2">
+               <div className="w-1.5 h-4 bg-brand-orange rounded-full"></div>
+               Compromissos Agendados
+            </h4>
+
+            <PDFCalendar 
+              year={parseInt(exportStartDate.split('-')[0])} 
+              month={parseInt(exportStartDate.split('-')[1]) - 1} 
+              highlightedDays={[
+                ...scheduledVisits.filter(v => v.date >= exportStartDate && v.date <= exportEndDate),
+                ...blockedSlots.filter(s => s.date >= exportStartDate && s.date <= exportEndDate)
+              ].map(v => v.date)} 
+            />
+
+            <div className="overflow-hidden rounded-2xl border border-slate-100">
+              <table className="w-full text-left text-[10px]">
+                <thead className="bg-slate-50 text-slate-400 uppercase tracking-widest font-bold border-b border-slate-100">
+                  <tr>
+                    <th className="px-5 py-4">Data/Hora</th>
+                    <th className="px-5 py-4">Cliente/Motivo</th>
+                    <th className="px-5 py-4">Tipo/Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {[
+                    ...scheduledVisits.filter(v => v.date >= exportStartDate && v.date <= exportEndDate).map(v => ({...v, typeKey: 'visit'})),
+                    ...blockedSlots.filter(s => s.date >= exportStartDate && s.date <= exportEndDate).map(s => ({...s, typeKey: 'blocked'}))
+                  ].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time)).map((v, i) => (
+                    <tr key={i} className="bg-white">
+                      <td className="px-5 py-4 font-bold text-slate-900">
+                        {v.date.split('-').reverse().join('/')} às {v.time}h
+                      </td>
+                      <td className="px-5 py-4 text-slate-500 font-medium">
+                        {v.typeKey === 'blocked' ? (
+                          <span style={{ color: '#DC2626' }}>BLOQUEIO: {v.reason || 'Sem motivo'}</span>
+                        ) : (
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-900">{v.name}</span>
+                            <span className="text-[8px] text-slate-400">{v.propertyName || 'Imóvel'}</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-tighter ${
+                          v.typeKey === 'blocked' ? 'bg-red-100 text-red-700' :
+                          v.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-brand-orange'
+                        }`}>
+                          {v.typeKey === 'blocked' ? 'Bloqueado' : v.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="mt-12 bg-slate-50 p-6 rounded-3xl border border-slate-100 italic" style={{ backgroundColor: '#F8FAFC' }}>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              Relatório consolidado de compromissos gerado via Portal RB Sorocaba. Este documento contém os agendamentos e bloqueios registrados para o período selecionado.
+            </p>
+          </div>
+        </div>
       </div>
     </motion.div>
   );
@@ -1581,7 +2203,7 @@ function PropertyCard({
             {property.purpose === 'Locação' ? 'Locação' : 'Venda'}
           </span>
           <span className="bg-white/90 backdrop-blur-md text-brand-dark px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/10">
-            {property.type}
+            {property.propertyType || property.type}
           </span>
         </div>
 
@@ -1994,6 +2616,81 @@ function HistoryModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function ConfirmVisitModal({ visitId, onClose }: { visitId: string; onClose: () => void }) {
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const onConfirm = async () => {
+    setIsFinishing(true);
+    try {
+      await updateVisitStatus(visitId, 'confirmed');
+      setSuccess(true);
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao confirmar. Tente novamente.");
+    } finally {
+      setIsFinishing(false);
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[1000] bg-brand-dark/95 backdrop-blur-3xl flex items-center justify-center p-6"
+    >
+      <div className="bg-white rounded-[3rem] p-12 max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/5 rounded-bl-full" />
+        
+        {success ? (
+          <div className="space-y-6 relative z-10">
+            <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-500">
+               <CheckCircle2 size={48} />
+            </div>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Visita Confirmada!</h2>
+            <p className="text-slate-500 font-bold leading-relaxed">
+              Sua presença está confirmada no sistema. Nos vemos em breve!
+            </p>
+            <button 
+              onClick={onClose}
+              className="w-full bg-brand-orange text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20"
+            >
+              Certo, obrigado!
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-8 relative z-10">
+            <div className="w-20 h-20 bg-brand-orange/10 rounded-full flex items-center justify-center mx-auto text-brand-orange">
+               <Calendar size={40} />
+            </div>
+            <div>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Confirmar Visita</h2>
+              <p className="text-slate-500 font-bold mt-2 leading-relaxed">Você recebeu uma confirmação da RB Sorocaba. Deseja confirmar seu agendamento em nosso sistema?</p>
+            </div>
+            <div className="flex flex-col gap-4">
+              <button 
+                onClick={onConfirm}
+                disabled={isFinishing}
+                className="w-full bg-brand-orange text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                {isFinishing ? <Loader2 className="animate-spin" size={20} /> : <Check size={20} />}
+                SIM, CONFIRMAR AGORA
+              </button>
+              <button 
+                onClick={onClose}
+                className="text-slate-400 font-black text-xs uppercase tracking-widest hover:text-brand-orange transition-colors"
+              >
+                MAIS TARDE
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
 export default function App() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -2011,6 +2708,17 @@ export default function App() {
   const [userFavorites, setUserFavorites] = useState<string[]>([]);
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [confirmingVisitId, setConfirmingVisitId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const confirmId = urlParams.get('confirm_visit');
+    if (confirmId) {
+      setConfirmingVisitId(confirmId);
+      // Remove param from URL to avoid repeating on refresh
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
 
   useEffect(() => {
     let unsubscribeFavorites: (() => void) | undefined;
@@ -2284,6 +2992,35 @@ export default function App() {
             }}
             onBlockSlot={async (slot) => {
               await blockSlot(slot);
+            }}
+            onUpdateVisitStatus={async (id, status) => {
+              try {
+                await updateVisitStatus(id, status);
+                if (status === 'confirmed') {
+                  const visit = scheduledVisits.find(v => v.id === id);
+                  if (visit) {
+                    const property = properties.find(p => p.id === String(visit.propertyId));
+                    await sendVisitConfirmationNotification({
+                      visit_id: id,
+                      to_name: visit.name,
+                      to_email: visit.email || 'atendimento@rbsorocaba.com.br',
+                      to_phone: visit.phone,
+                      property_title: property?.title || 'Imóvel Selecionado',
+                      visit_date: visit.date,
+                      visit_time: visit.time
+                    });
+                    alert("Visita confirmada e notificação enviada!");
+                  }
+                } else {
+                  alert("Status atualizado com sucesso!");
+                }
+              } catch (error) {
+                console.error("Erro ao atualizar visita:", error);
+                alert("Erro ao atualizar status da visita.");
+              }
+            }}
+            onDeleteVisit={async (id) => {
+              await deleteVisit(id);
             }}
             onClose={() => setIsAdminOpen(false)} 
             isAuthorized={isAuthorized}
@@ -2817,12 +3554,12 @@ export default function App() {
                       <input 
                         type="range"
                         min="0"
-                        max="15000000"
-                        step="250000"
-                        value={maxPrice === '' ? 15000000 : maxPrice}
+                        max="10000000"
+                        step="100000"
+                        value={maxPrice === '' ? 10000000 : maxPrice}
                         onChange={(e) => {
                           const val = Number(e.target.value);
-                          const finalVal = val === 15000000 ? '' : val;
+                          const finalVal = val === 10000000 ? '' : val;
                           setMaxPrice(finalVal);
                           setMaxPriceDisplay(finalVal === '' ? '' : formatCurrency(finalVal));
                         }}
@@ -3174,9 +3911,9 @@ export default function App() {
                             setSelectedPropertyForVisit(featuredProperties[featuredIndex]);
                             setIsVisitModalOpen(true);
                           }}
-                          className="btn-primary !py-6 !px-10 text-lg flex items-center justify-center gap-4 group/btn shadow-[0_20px_40px_rgba(255,92,0,0.2)]"
+                          className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 transition-all duration-300 !py-6 !px-10 text-lg flex items-center justify-center gap-4 group/btn shadow-[0_20px_40px_rgba(255,92,0,0.3)] rounded-[2rem] text-white"
                         >
-                          <span className="font-black tracking-widest">AGENDAR VISITA VIP</span>
+                          <span className="font-black tracking-widest uppercase">Agendar Visita VIP</span>
                           <Calendar size={20} className="group-hover/btn:scale-110 transition-transform" />
                         </button>
                       </div>
@@ -3546,6 +4283,12 @@ export default function App() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+        {confirmingVisitId && (
+          <ConfirmVisitModal 
+            visitId={confirmingVisitId} 
+            onClose={() => setConfirmingVisitId(null)} 
+          />
         )}
       </AnimatePresence>
 

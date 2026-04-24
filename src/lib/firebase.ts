@@ -286,6 +286,35 @@ export const saveLead = async (leadData: { name: string; phone: string; email?: 
 };
 
 /**
+ * Updates a visit's status
+ */
+export const updateVisitStatus = async (visitId: string, status: 'pending' | 'confirmed' | 'cancelled') => {
+  try {
+    const docRef = doc(db, "visits", visitId);
+    await updateDoc(docRef, { 
+      status,
+      updatedAt: serverTimestamp() 
+    });
+    return { success: true };
+  } catch (error) {
+    throw handleFirestoreError(error, 'update', `visits/${visitId}`);
+  }
+};
+
+/**
+ * Deletes a visit
+ */
+export const deleteVisit = async (visitId: string) => {
+  try {
+    const docRef = doc(db, "visits", visitId);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (error) {
+    throw handleFirestoreError(error, 'delete', `visits/${visitId}`);
+  }
+};
+
+/**
  * Error handler for Firestore operations
  */
 const handleFirestoreError = (error: any, operationType: string, path: string) => {
