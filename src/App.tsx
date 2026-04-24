@@ -21,6 +21,8 @@ import {
   Menu,
   X,
   Star,
+  DollarSign,
+  Info,
   ChevronRight,
   ArrowRight,
   Send,
@@ -181,6 +183,32 @@ const PROPERTY_CATEGORIES = {
 } as const;
 
 type PropertyCategory = keyof typeof PROPERTY_CATEGORIES;
+
+// --- Helpers ---
+
+const parsePriceInput = (value: string): number | "" => {
+  if (!value) return "";
+  const clean = value.toLowerCase().replace(/[r$\s.]/g, "").replace(",", ".");
+  if (clean.endsWith("m")) {
+    const num = parseFloat(clean);
+    return isNaN(num) ? "" : num * 1000000;
+  }
+  if (clean.endsWith("k")) {
+    const num = parseFloat(clean);
+    return isNaN(num) ? "" : num * 1000;
+  }
+  const parsed = parseFloat(clean);
+  return isNaN(parsed) ? "" : parsed;
+};
+
+const formatCurrency = (value: number | "") => {
+  if (value === "") return "";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    maximumFractionDigits: 0,
+  }).format(value);
+};
 
 // --- Components ---
 
@@ -1573,14 +1601,14 @@ function PropertyCard({
         </button>
       </div>
       
-      <div className="p-8">
-        <div className="flex justify-between items-start mb-6">
+      <div className="p-6 md:p-8">
+        <div className="flex justify-between items-start mb-4 md:mb-6">
           <div>
-            <h3 className="text-2xl font-bold text-brand-dark mb-2 tracking-tight group-hover:text-brand-orange transition-colors">
+            <h3 className="text-xl md:text-2xl font-bold text-brand-dark mb-1 md:mb-2 tracking-tight group-hover:text-brand-orange transition-colors">
               {property.title}
             </h3>
-            <div className="flex items-center text-slate-400 text-sm font-medium italic">
-              <MapPin size={16} className="mr-1 text-brand-orange" />
+            <div className="flex items-center text-slate-400 text-[10px] md:text-sm font-medium italic">
+              <MapPin size={14} className="mr-1 text-brand-orange md:w-4 md:h-4" />
               {property.location}
             </div>
           </div>
@@ -1610,22 +1638,22 @@ function PropertyCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 py-6 border-t border-slate-50">
-          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <BedDouble className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={16} />
-            <span className="text-[10px] font-bold text-slate-900">{property.beds || 0} Dorm</span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-5 md:py-6 border-t border-slate-50">
+          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <BedDouble className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
+            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.beds || 0} Dorm</span>
           </div>
-          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <Bath className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={16} />
-            <span className="text-[10px] font-bold text-slate-900">{property.suites || 0} Suítes</span>
+          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <Bath className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
+            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.suites || 0} Suítes</span>
           </div>
-          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <Home className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={16} />
-            <span className="text-[10px] font-bold text-slate-900">{(property.parkingCovered || 0) + (property.parkingUncovered || 0)} Vagas</span>
+          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <Home className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
+            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{(property.parkingCovered || 0) + (property.parkingUncovered || 0)} Vagas</span>
           </div>
-          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors cursor-help" title={`Total: ${property.areaTotal || property.area} / Útil: ${property.areaUseful || property.area}`}>
-            <Maximize className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={16} />
-            <span className="text-[10px] font-bold text-slate-900">{property.areaUseful || property.area}</span>
+          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors cursor-help" title={`Total: ${property.areaTotal || property.area} / Útil: ${property.areaUseful || property.area}`}>
+            <Maximize className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
+            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.areaUseful || property.area}</span>
           </div>
         </div>
 
@@ -2059,6 +2087,8 @@ export default function App() {
   const [typeFilter, setTypeFilter] = useState<string>('Todas');
   const [minPrice, setMinPrice] = useState<number | ''>('');
   const [maxPrice, setMaxPrice] = useState<number | ''>('');
+  const [minPriceDisplay, setMinPriceDisplay] = useState('');
+  const [maxPriceDisplay, setMaxPriceDisplay] = useState('');
   const [sortBy, setSortBy] = useState<'default' | 'price-asc'>('default');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMegaFilter, setShowMegaFilter] = useState(false);
@@ -2453,7 +2483,7 @@ export default function App() {
 
           {/* Mobile Menu Toggle */}
           <button 
-            className={`md:hidden p-2 rounded-lg ${isScrolled ? 'text-brand-dark' : 'text-white'}`}
+            className={`md:hidden p-2 rounded-lg transition-colors ${isScrolled ? 'text-white' : 'text-white'}`}
             onClick={() => setMobileMenuOpen(true)}
           >
             <Menu size={28} />
@@ -2638,11 +2668,11 @@ export default function App() {
                 <div className="h-[2px] w-12 bg-brand-orange" />
                 <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Exclusividade em Sorocaba</span>
               </div>
-              <h1 className="text-4xl md:text-7xl lg:text-8xl text-white font-black leading-[0.9] mb-8 tracking-tighter">
-                SUA PRÓXIMA <br />
+              <h1 className="text-4xl md:text-7xl lg:text-8xl text-white font-black leading-[1.1] md:leading-[0.9] mb-6 md:mb-8 tracking-tighter">
+                SUA PRÓXIMA <br className="hidden md:block" />
                 <span className="text-brand-orange drop-shadow-[0_0_30px_rgba(255,92,0,0.3)]">CONQUISTA</span>
               </h1>
-              <p className="text-xl text-white/70 mb-10 max-w-2xl leading-relaxed font-medium">
+              <p className="text-base md:text-xl text-white/70 mb-8 md:mb-10 max-w-2xl leading-relaxed font-medium">
                 Curadoria especializada dos imóveis mais desejados da região. <br className="hidden md:block" />
                 Arquitetura, luxo e o endereço que você sempre sonhou.
               </p>
@@ -2669,16 +2699,16 @@ export default function App() {
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.8 }}
-              className="bg-black/80 backdrop-blur-3xl p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.5)] flex flex-col items-stretch gap-4 md:gap-6 border border-white/5"
+              className="bg-black/80 backdrop-blur-3xl p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.5)] flex flex-col items-stretch gap-4 md:gap-6 border border-white/5"
             >
               <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 md:gap-6">
                 <div className="flex-1 relative">
-                  <div className="flex items-center px-6 bg-white/5 rounded-2xl border border-white/10 py-4 group focus-within:border-brand-orange transition-all">
-                    <Search className="text-brand-orange mr-3 shrink-0" size={24} />
+                  <div className="flex items-center px-6 bg-white/5 rounded-2xl border border-white/10 py-3.5 md:py-4 group focus-within:border-brand-orange transition-all shadow-inner">
+                    <Search className="text-brand-orange mr-3 shrink-0" size={22} />
                     <input 
                       type="text" 
-                      placeholder="Busque por localização, bairro ou condomínio..." 
-                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-lg"
+                      placeholder="Localização, bairro ou condomínio..." 
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-base md:text-lg"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -2696,19 +2726,19 @@ export default function App() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 10 }}
-                        className="absolute top-full left-0 w-full mt-4 bg-black/90 backdrop-blur-2xl rounded-[1.5rem] shadow-2xl border border-white/10 z-50 overflow-hidden"
+                        className="absolute top-full left-0 w-full mt-3 bg-black/95 backdrop-blur-2xl rounded-[1.5rem] shadow-2xl border border-white/10 z-50 overflow-hidden"
                       >
                         {suggestions.map((s, i) => (
                           <button
                             key={i}
-                            className="w-full text-left px-8 py-5 hover:bg-brand-orange/10 transition-colors flex items-center space-x-4 group border-b border-white/5 last:border-0"
+                            className="w-full text-left px-7 py-4 hover:bg-brand-orange/10 transition-colors flex items-center space-x-4 group border-b border-white/5 last:border-0"
                             onClick={() => {
                               setSearchTerm(s);
                               setShowSuggestions(false);
                             }}
                           >
                             <MapPin size={18} className="text-white/20 group-hover:text-brand-orange transition-colors" />
-                            <span className="text-white/60 group-hover:text-white font-bold">{s}</span>
+                            <span className="text-white/60 group-hover:text-white font-bold text-sm md:text-base">{s}</span>
                           </button>
                         ))}
                       </motion.div>
@@ -2716,7 +2746,7 @@ export default function App() {
                   </AnimatePresence>
                 </div>
                 
-                <div className="md:w-56 bg-white/5 rounded-2xl border border-white/10 px-6 py-4 relative group focus-within:border-brand-orange transition-all">
+                <div className="md:w-64 bg-white/5 rounded-2xl border border-white/10 px-6 py-3.5 md:py-4 relative group focus-within:border-brand-orange transition-all shadow-inner">
                   <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Categoria</span>
                   <select 
                     className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-xs tracking-widest"
@@ -2733,57 +2763,131 @@ export default function App() {
                   </select>
                 </div>
 
-                <a href="#properties" className="btn-primary !px-12 !py-5 shadow-orange-500/20 text-center whitespace-nowrap hidden md:flex items-center gap-3">
+                <a href="#properties" className="btn-primary !px-10 !py-3.5 md:!py-4 shadow-orange-500/20 text-center whitespace-nowrap flex items-center justify-center gap-3 w-full md:w-auto">
                   <Search size={20} />
-                  <span>BUSCAR</span>
+                  <span>BUSCAR IMÓVEIS</span>
                 </a>
               </div>
 
-              <div className="flex flex-col lg:flex-row items-center gap-8 pt-6 border-t border-white/5">
-                <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
-                  <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em] whitespace-nowrap">Investment Range</span>
-                  <div className="flex items-center gap-3 w-full sm:w-auto">
-                    <input 
-                      type="number" 
-                      placeholder="Mínimo"
-                      className="w-full sm:w-36 bg-white/5 border border-white/10 rounded-xl px-5 py-2.5 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all"
-                      value={minPrice}
-                      onChange={(e) => setMinPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                    />
-                    <div className="w-4 h-[1px] bg-white/10" />
-                    <input 
-                      type="number" 
-                      placeholder="Máximo"
-                      className="w-full sm:w-36 bg-white/5 border border-white/10 rounded-xl px-5 py-2.5 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all"
-                      value={maxPrice}
-                      onChange={(e) => setMaxPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                    />
+              <div className="flex flex-col gap-6 pt-6 border-t border-white/5">
+                <div className="flex flex-col lg:flex-row items-center gap-6 lg:gap-10 w-full">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
+                    <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em] whitespace-nowrap">Faixa de Investimento</span>
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <div className="flex-1 sm:w-40 relative group">
+                        <input 
+                          type="text" 
+                          placeholder="Mínimo (ex: 500k)"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10 transition-all"
+                          value={minPriceDisplay}
+                          onChange={(e) => setMinPriceDisplay(e.target.value)}
+                          onBlur={() => {
+                            const val = parsePriceInput(minPriceDisplay);
+                            setMinPrice(val);
+                            if (val !== '') setMinPriceDisplay(formatCurrency(val));
+                          }}
+                        />
+                      </div>
+                      <div className="w-4 h-[1px] bg-white/20" />
+                      <div className="flex-1 sm:w-40 relative group">
+                        <input 
+                          type="text" 
+                          placeholder="Máximo (ex: 2M)"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10 transition-all"
+                          value={maxPriceDisplay}
+                          onChange={(e) => setMaxPriceDisplay(e.target.value)}
+                          onBlur={() => {
+                            const val = parsePriceInput(maxPriceDisplay);
+                            setMaxPrice(val);
+                            if (val !== '') setMaxPriceDisplay(formatCurrency(val));
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 w-full flex flex-col gap-3">
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em]">Arraste para definir teto de preço</span>
+                      <span className="text-[11px] font-black text-brand-orange font-mono">
+                        {maxPrice === '' ? 'SEM LIMITE' : formatCurrency(maxPrice)}
+                      </span>
+                    </div>
+                    <div className="relative h-6 flex items-center">
+                      <input 
+                        type="range"
+                        min="0"
+                        max="15000000"
+                        step="250000"
+                        value={maxPrice === '' ? 15000000 : maxPrice}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          const finalVal = val === 15000000 ? '' : val;
+                          setMaxPrice(finalVal);
+                          setMaxPriceDisplay(finalVal === '' ? '' : formatCurrency(finalVal));
+                        }}
+                        className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-brand-orange hover:accent-orange-500 transition-all"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="h-8 w-[1px] bg-white/10 hidden lg:block" />
+                {/* Applied Filter Tags */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-[9px] font-black text-white/20 uppercase tracking-widest mr-2">Filtros Ativos:</span>
+                  
+                  {searchTerm && (
+                    <div className="flex items-center gap-2 bg-brand-orange/10 border border-brand-orange/30 px-3 py-1.5 rounded-full transition-all hover:bg-brand-orange/20">
+                      <Search size={10} className="text-brand-orange" />
+                      <span className="text-[9px] font-black text-brand-orange uppercase">{searchTerm}</span>
+                      <button onClick={() => setSearchTerm('')} className="text-brand-orange/50 hover:text-white"><X size={10} /></button>
+                    </div>
+                  )}
 
-                <div className="flex flex-wrap gap-3 justify-center">
-                  {[
-                    { label: 'High-End (< 2M)', min: '', max: 2000000 },
-                    { label: 'Ultra-Luxury (> 5M)', min: 5000000, max: '' }
-                  ].map((preset, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => {
-                        setMinPrice(preset.min as any);
-                        setMaxPrice(preset.max as any);
-                      }}
-                      className="text-[9px] uppercase tracking-widest font-black text-white/40 hover:text-brand-orange hover:bg-brand-orange/10 px-4 py-2 rounded-full border border-white/10 hover:border-brand-orange/40 transition-all"
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
+                  {(minPrice !== '' || maxPrice !== '') && (
+                    <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
+                      <DollarSign size={10} className="text-white/40" />
+                      <span className="text-[9px] font-black text-white/50 uppercase">
+                        {minPrice !== '' ? formatCurrency(minPrice) : 'R$ 0'} - {maxPrice !== '' ? formatCurrency(maxPrice) : '∞'}
+                      </span>
+                      <button 
+                        onClick={() => {
+                          setMinPrice(''); setMaxPrice('');
+                          setMinPriceDisplay(''); setMaxPriceDisplay('');
+                        }} 
+                        className="text-white/20 hover:text-white"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  )}
+
+                  {categoryFilter !== 'Todas' && (
+                    <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
+                      <Home size={10} className="text-white/40" />
+                      <span className="text-[9px] font-black text-white/50 uppercase">{categoryFilter}</span>
+                      <button onClick={() => setCategoryFilter('Todas')} className="text-white/20 hover:text-white"><X size={10} /></button>
+                    </div>
+                  )}
+
+                  {!searchTerm && minPrice === '' && maxPrice === '' && categoryFilter === 'Todas' && (
+                    <span className="text-[9px] font-bold text-white/10 uppercase italic">Nenhum filtro aplicado</span>
+                  )}
+
+                  <button 
+                    onClick={() => {
+                      setSearchTerm('');
+                      setCategoryFilter('Todas');
+                      setMinPrice('');
+                      setMaxPrice('');
+                      setMinPriceDisplay('');
+                      setMaxPriceDisplay('');
+                    }}
+                    className="ml-auto text-[8px] font-black text-white/20 hover:text-brand-orange uppercase tracking-widest transition-colors underline underline-offset-4"
+                  >
+                    Limpar Tudo
+                  </button>
                 </div>
-
-                <a href="#properties" className="w-full btn-primary !py-5 shadow-orange-500/20 text-center whitespace-nowrap block md:hidden mt-4">
-                  BUSCAR IMÓVEIS
-                </a>
               </div>
             </motion.div>
 
@@ -2842,7 +2946,7 @@ export default function App() {
                 <div className="w-10 h-[2px] bg-brand-orange" />
                 <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Lifestyle Sorocaba</span>
               </div>
-              <h2 className="text-5xl md:text-7xl font-black leading-[0.9] tracking-tighter uppercase">Excelência em cada <br /> <span className="text-brand-orange">DETALHE.</span></h2>
+              <h2 className="text-4xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
               <p className="text-slate-500 text-lg leading-relaxed font-medium">
                 Nossa missão transcende a simples venda de imóveis. Entregamos curadoria, exclusividade e segurança jurídica para que sua única preocupação seja aproveitar o novo lar.
               </p>
