@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ---------------------------------------------------------
+    // Habilita helpers globais
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'luiz.uehara1@gmail.com' ||
+        request.auth.token.email == 'eliasborgess@creci.org.com.br' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ---------------------------------------------------------
+    // Catch-all deny
+    // ---------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Admins Collection
+    // ---------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Somente via console ou script master
+    }
+
+    // ---------------------------------------------------------
+    // Properties Collection
+    // ---------------------------------------------------------
+    function isValidProperty(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.price is string && data.price.size() <= 100 &&
+             data.image is string && data.image.size() <= 1000;
+    }
+
+    match /properties/{propertyId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidProperty(incoming()) && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidProperty(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Property Submissions
+    // ---------------------------------------------------------
+    match /property_submissions/{submissionId} {
+      allow create: if isSignedIn() && isValidProperty(incoming()) && incoming().status == 'pending';
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Visits Collection
+    // ---------------------------------------------------------
+    function isValidVisit(data) {
+      return data.name is string && data.name.size() <= 100 &&
+             data.phone is string && data.phone.size() <= 30 &&
+             data.date is string && data.time is string;
+    }
+
+    match /visits/{visitId} {
+      allow create: if true; // Aberto ao público para agendar
+      allow list: if isAdmin();
+      allow get: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Blocked Slots
+    // ---------------------------------------------------------
+    match /blocked_slots/{slotId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Leads Collection
+    // ---------------------------------------------------------
+    match /leads/{leadId} {
+      allow create: if true;
+      allow read: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Favorites Collection
+    // ---------------------------------------------------------
+    match /favorites/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && incoming().lastUpdated == request.time;
+      
+      match /items/{propertyId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}

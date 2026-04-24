@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "property": {
+      "title": "Imóvel",
+      "description": "Dados principais de um imóvel da imobiliária",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "location": { "type": "string" },
+        "city": { "type": "string" },
+        "neighborhood": { "type": "string" },
+        "condominium": { "type": "string" },
+        "purpose": { "type": "string", "enum": ["Venda", "Locação"] },
+        "price": { "type": "string" },
+        "priceValue": { "type": "number" },
+        "category": { "type": "string", "enum": ["Residencial", "Comercial", "Rural"] },
+        "type": { "type": "string" },
+        "beds": { "type": "number" },
+        "suites": { "type": "number" },
+        "baths": { "type": "number" },
+        "parkingCovered": { "type": "number" },
+        "parkingUncovered": { "type": "number" },
+        "area": { "type": "string" },
+        "image": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "price", "image"]
+    },
+    "visit": {
+      "title": "Visita",
+      "description": "Agendamento de visita a um imóvel",
+      "type": "object",
+      "properties": {
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled"] }
+      },
+      "required": ["propertyId", "name", "phone", "date", "time"]
+    },
+    "blocked_slot": {
+      "title": "Horário Bloqueado",
+      "description": "Horário que não pode ser agendado",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "required": ["date", "time"]
+    }
+  },
+  "firestore": {
+    "/properties/{propertyId}": {
+      "schema": "property",
+      "description": "Catálogo de imóveis aprovados"
+    },
+    "/property_submissions/{submissionId}": {
+      "schema": "property",
+      "description": "Submissões enviadas por proprietários"
+    },
+    "/visits/{visitId}": {
+      "schema": "visit",
+      "description": "Agendamentos de visitas"
+    },
+    "/blocked_slots/{slotId}": {
+      "schema": "blocked_slot",
+      "description": "Bloqueios de agenda"
+    },
+    "/favorites/{userId}/items/{propertyId}": {
+      "schema": {
+        "title": "Favorito",
+        "type": "object",
+        "properties": {
+          "addedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Imóveis favoritados pelo usuário"
+    },
+    "/leads/{leadId}": {
+      "schema": {
+        "title": "Lead",
+        "description": "Contato de interessado",
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "phone": { "type": "string" },
+          "interest": { "type": "string" }
+        }
+      },
+      "description": "Contatos captados pelo site"
+    }
+  }
+}
