@@ -38,6 +38,8 @@ import {
   Calendar,
   Check,
   Shield,
+  ShieldCheck,
+  Lock,
   Camera,
   Upload,
   ImagePlus,
@@ -319,7 +321,7 @@ function VisitRegistrationOverlay({
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-[110] bg-brand-dark/95 backdrop-blur-xl flex items-center justify-center p-6"
       >
-        <div className="bg-white rounded-[3rem] p-12 max-w-xl w-full text-center space-y-8 shadow-2xl relative">
+        <div className="bg-white rounded-3xl md:rounded-[3rem] p-12 max-w-xl w-full text-center space-y-8 shadow-2xl relative">
           <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
             <Check size={48} />
           </div>
@@ -352,7 +354,7 @@ function VisitRegistrationOverlay({
           </div>
           <button 
             onClick={onClose}
-            className="w-full btn-primary py-5 text-xl"
+            className="w-full btn-primary py-4 md:py-5 text-lg md:text-xl"
           >
             Voltar ao Site
           </button>
@@ -375,7 +377,7 @@ function VisitRegistrationOverlay({
               <Calendar size={32} />
             </div>
             <div>
-              <h2 className="text-4xl font-black tracking-tighter uppercase leading-none">Visita <span className="text-brand-orange">VIP</span></h2>
+              <h2 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-none">Visita <span className="text-brand-orange">VIP</span></h2>
               <p className="text-white/40 text-sm font-bold tracking-[0.2em]">{property.title}</p>
             </div>
           </div>
@@ -391,9 +393,9 @@ function VisitRegistrationOverlay({
           <div className="grid lg:grid-cols-2 gap-16 items-start">
             {/* Property Preview Card */}
             <div className="hidden lg:block space-y-8 sticky top-0 group">
-              <div className="rounded-[3rem] overflow-hidden shadow-2xl border border-white/5 relative">
+              <div className="rounded-3xl md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/5 relative">
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10" />
-                <img src={property.image} className="w-full h-[500px] object-cover group-hover:scale-105 transition-transform duration-[2s]" alt={property.title} />
+                <img src={property.image} className="w-full h-[350px] md:h-[500px] object-cover group-hover:scale-105 transition-transform duration-[2s]" alt={property.title} />
                 <div className="absolute bottom-10 left-10 z-20">
                   <div className="flex items-center text-brand-orange mb-2 font-bold tracking-widest text-xs uppercase">
                     <MapPin size={14} className="mr-2" />
@@ -418,7 +420,7 @@ function VisitRegistrationOverlay({
                   </div>
                 </div>
               </div>
-              <div className="bg-brand-orange/10 border border-brand-orange/20 p-10 rounded-[2.5rem]">
+              <div className="bg-brand-orange/10 border border-brand-orange/20 p-8 md:p-10 rounded-3xl md:rounded-[2.5rem]">
                 <p className="text-brand-orange leading-relaxed font-bold italic text-xl text-center">
                   "Viva a experiência exclusiva de conhecer cada detalhe desta propriedade excepcional com um de nossos diretores."
                 </p>
@@ -426,7 +428,7 @@ function VisitRegistrationOverlay({
             </div>
 
             {/* Visit Form */}
-            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-2xl relative overflow-hidden">
+            <div className="bg-white rounded-3xl md:rounded-[3.5rem] p-10 md:p-16 shadow-2xl relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/5 rounded-bl-full" />
               
               <form onSubmit={handleSubmit} className="relative z-10 space-y-8">
@@ -600,7 +602,7 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-20">
             {/* Gallery Carousel Section */}
             <div className="space-y-6">
-              <div className="relative group rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3] bg-white/5">
+              <div className="relative group rounded-3xl md:rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3] bg-white/5">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={currentMediaIndex}
@@ -860,7 +862,7 @@ function MonthlyReportModal({
       <motion.div 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="bg-white rounded-[3rem] w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+        className="bg-white rounded-3xl md:rounded-[3rem] w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
       >
         <div className="p-8 md:p-10 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <div>
@@ -1460,7 +1462,7 @@ function AdminPortal({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="bg-red-50 border border-red-100 rounded-[2.5rem] p-8 md:p-12 space-y-6"
+              className="bg-red-50 border border-red-100 rounded-3xl md:rounded-[2.5rem] p-8 md:p-12 space-y-6"
             >
               <div className="flex items-center space-x-3 mb-4">
                  <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center">
@@ -1513,11 +1515,11 @@ function AdminPortal({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="bg-white rounded-[2.5rem] overflow-hidden"
+              className="bg-white rounded-3xl md:rounded-[2.5rem] overflow-hidden"
             >
               {showSuccess ? (
                 <div className="p-12 md:p-20 flex flex-col items-center justify-center text-center space-y-8">
-                  <div className="w-24 h-24 bg-green-50 rounded-[2.5rem] flex items-center justify-center text-green-500">
+                  <div className="w-20 h-20 md:w-24 md:h-24 bg-green-50 rounded-2xl md:rounded-[2.5rem] flex items-center justify-center text-green-500">
                     <CheckCircle2 size={48} />
                   </div>
                   <div className="space-y-4">
@@ -1792,7 +1794,7 @@ function AdminPortal({
                     </div>
 
                     {imageUrls[0] && (
-                      <div className="bg-slate-50 rounded-[2.5rem] p-8">
+                      <div className="bg-slate-50 rounded-3xl md:rounded-[2.5rem] p-6 md:p-8">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Prévia da Capa</p>
                         <div className="aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/10">
                           <img src={imageUrls[0]} className="w-full h-full object-cover" alt="Preview Capa" onError={(e) => e.currentTarget.src = 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop'} />
@@ -1841,7 +1843,7 @@ function AdminPortal({
 
         {/* Property List Table - Only for Admin */}
         {isAuthorized && (
-          <div className="bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden">
+          <div className="bg-white/5 border border-white/10 rounded-3xl md:rounded-[2.5rem] overflow-hidden">
             <div className="p-8 border-b border-white/10 flex justify-between items-center">
               <h3 className="text-xl font-bold text-white">
                 {activeTab === 'inventory' ? 'Suas Propriedades Cadastradas' : 
@@ -2188,7 +2190,7 @@ function PropertyCard({
       initial={{ opacity: 0, y: 30 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      className="bg-white rounded-[2rem] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.05)] hover:shadow-[0_30px_60px_rgba(0,0,0,0.12)] transition-all duration-700 group border border-slate-100 cursor-pointer relative"
+      className="bg-white rounded-2xl md:rounded-[2rem] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.05)] hover:shadow-[0_30px_60px_rgba(0,0,0,0.12)] transition-all duration-700 group border border-slate-100 cursor-pointer relative"
     >
       <div className="relative h-72 overflow-hidden" onClick={() => onSelect(property)}>
         <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-all duration-500 z-10" />
@@ -2441,7 +2443,7 @@ function ContactForm() {
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white p-12 rounded-[3rem] shadow-2xl text-center"
+        className="bg-white p-12 rounded-3xl md:rounded-[3rem] shadow-2xl text-center"
       >
         <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
           <CheckCircle2 size={48} />
@@ -2459,7 +2461,7 @@ function ContactForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-8 md:p-12 rounded-[3rem] shadow-2xl space-y-6 border border-slate-100">
+    <form onSubmit={handleSubmit} className="bg-white p-8 md:p-12 rounded-3xl md:rounded-[3rem] shadow-2xl space-y-6 border border-slate-100">
       <div className="grid md:grid-cols-2 gap-6">
         <div className="space-y-2">
           <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Nome Completo</label>
@@ -2525,7 +2527,7 @@ function ContactForm() {
 
       <button 
         disabled={status === 'loading'}
-        className="w-full btn-primary py-5 text-xl flex items-center justify-center space-x-3 disabled:opacity-50"
+        className="w-full btn-primary py-4 md:py-5 text-lg md:text-xl flex items-center justify-center space-x-3 disabled:opacity-50"
       >
         {status === 'loading' ? (
           <>
@@ -2559,7 +2561,7 @@ function HistoryModal({ onClose }: { onClose: () => void }) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[130] bg-black/95 backdrop-blur-3xl p-6 md:p-12 overflow-y-auto flex items-center justify-center"
     >
-      <div className="max-w-4xl w-full bg-white rounded-[3rem] p-8 md:p-16 relative shadow-2xl overflow-hidden group">
+      <div className="max-w-4xl w-full bg-white rounded-3xl md:rounded-[3rem] p-8 md:p-16 relative shadow-2xl overflow-hidden group">
         <div className="absolute top-0 right-0 w-64 h-64 bg-brand-orange opacity-5 rounded-bl-full -mr-10 -mt-10" />
         
         <button 
@@ -2619,15 +2621,17 @@ function HistoryModal({ onClose }: { onClose: () => void }) {
 function ConfirmVisitModal({ visitId, onClose }: { visitId: string; onClose: () => void }) {
   const [isFinishing, setIsFinishing] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const onConfirm = async () => {
     setIsFinishing(true);
+    setError(null);
     try {
       await updateVisitStatus(visitId, 'confirmed');
       setSuccess(true);
     } catch (e) {
       console.error(e);
-      alert("Erro ao confirmar. Tente novamente.");
+      setError("Não foi possível confirmar sua visita no momento. Por favor, tente novamente ou entre em contato via WhatsApp.");
     } finally {
       setIsFinishing(false);
     }
@@ -2640,49 +2644,84 @@ function ConfirmVisitModal({ visitId, onClose }: { visitId: string; onClose: () 
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[1000] bg-brand-dark/95 backdrop-blur-3xl flex items-center justify-center p-6"
     >
-      <div className="bg-white rounded-[3rem] p-12 max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/5 rounded-bl-full" />
+      <div className="bg-white rounded-3xl md:rounded-[3rem] p-8 md:p-12 max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-24 h-24 md:w-32 md:h-32 bg-brand-orange/5 rounded-bl-full" />
         
+        {/* Logo and Brand */}
+        <div className="flex items-center justify-center space-x-3 mb-10">
+          <div className="w-10 h-10 bg-brand-orange flex items-center justify-center rounded-xl">
+            <Home className="text-white" size={20} />
+          </div>
+          <span className="text-xl font-black tracking-tight text-slate-900 uppercase">
+            RB <span className="text-brand-orange">SOROCABA</span>
+          </span>
+        </div>
+
         {success ? (
-          <div className="space-y-6 relative z-10">
-            <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-500">
-               <CheckCircle2 size={48} />
+          <div className="space-y-4 md:space-y-6 relative z-10">
+            <div className="w-20 h-20 md:w-24 md:h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-500">
+               <CheckCircle2 className="w-10 h-10 md:w-12 md:h-12" />
             </div>
-            <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Visita Confirmada!</h2>
-            <p className="text-slate-500 font-bold leading-relaxed">
-              Sua presença está confirmada no sistema. Nos vemos em breve!
-            </p>
+            <div>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase">Visita Confirmada!</h2>
+              <p className="text-sm md:text-base text-slate-500 font-bold mt-2 leading-relaxed">
+                Sua presença foi registrada com sucesso em nossa agenda VIP.
+              </p>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left">
+              <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Próximos Passos</p>
+              <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                Um de nossos especialistas entrará em contato em breve para alinhar os últimos detalhes e o ponto de encontro.
+              </p>
+            </div>
             <button 
               onClick={onClose}
-              className="w-full bg-brand-orange text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20"
+              className="w-full bg-brand-orange text-white py-4 md:py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20"
             >
-              Certo, obrigado!
+              Concluir
             </button>
           </div>
         ) : (
-          <div className="space-y-8 relative z-10">
-            <div className="w-20 h-20 bg-brand-orange/10 rounded-full flex items-center justify-center mx-auto text-brand-orange">
-               <Calendar size={40} />
+          <div className="space-y-6 md:space-y-8 relative z-10">
+            <div className="w-16 h-16 md:w-20 md:h-20 bg-brand-orange/10 rounded-full flex items-center justify-center mx-auto text-brand-orange">
+               <Calendar className="w-8 h-8 md:w-10 md:h-10" />
             </div>
             <div>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Confirmar Visita</h2>
-              <p className="text-slate-500 font-bold mt-2 leading-relaxed">Você recebeu uma confirmação da RB Sorocaba. Deseja confirmar seu agendamento em nosso sistema?</p>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase">Validação de Visita</h2>
+              <p className="text-sm md:text-base text-slate-500 font-bold mt-2 leading-relaxed">
+                Recebemos sua solicitação. Por favor, confirme seu interesse para que possamos reservar seu horário exclusivo.
+              </p>
             </div>
+
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-xs font-bold border border-red-100 italic">
+                {error}
+              </div>
+            )}
+
             <div className="flex flex-col gap-4">
               <button 
                 onClick={onConfirm}
                 disabled={isFinishing}
-                className="w-full bg-brand-orange text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-3 disabled:opacity-50"
+                className="w-full bg-brand-orange text-white py-4 md:py-5 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-orange-500/20 flex items-center justify-center gap-3 disabled:opacity-50"
               >
-                {isFinishing ? <Loader2 className="animate-spin" size={20} /> : <Check size={20} />}
-                SIM, CONFIRMAR AGORA
+                {isFinishing ? <Loader2 className="animate-spin" size={20} /> : <ShieldCheck size={20} />}
+                {isFinishing ? 'PROCESSANDO...' : 'CONFIRMAR PRESENÇA VIP'}
               </button>
-              <button 
-                onClick={onClose}
-                className="text-slate-400 font-black text-xs uppercase tracking-widest hover:text-brand-orange transition-colors"
-              >
-                MAIS TARDE
-              </button>
+              
+              {!isFinishing && (
+                <button 
+                  onClick={onClose}
+                  className="text-slate-400 font-bold uppercase tracking-widest text-[10px] hover:text-slate-600 transition-colors"
+                >
+                  Confirmar mais tarde
+                </button>
+              )}
+            </div>
+
+            <div className="pt-6 border-t border-slate-100 flex items-center justify-center space-x-2 text-slate-400">
+               <Lock size={12} />
+               <span className="text-[10px] font-black uppercase tracking-widest">Conexão Segura & Criptografada</span>
             </div>
           </div>
         )}
@@ -2942,7 +2981,7 @@ export default function App() {
   if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center space-y-6">
-        <div className="w-20 h-20 bg-brand-orange/20 rounded-[2rem] flex items-center justify-center animate-pulse">
+                <div className="w-16 h-16 md:w-20 md:h-20 bg-brand-orange/20 rounded-2xl md:rounded-[2rem] flex items-center justify-center animate-pulse">
           <Home size={40} className="text-brand-orange" />
         </div>
         <div className="flex flex-col items-center space-y-2">
@@ -3060,7 +3099,7 @@ export default function App() {
                     <Search size={32} />
                   </div>
                   <div>
-                    <h2 className="text-4xl font-black text-white uppercase tracking-tighter">O QUE VOCÊ <span className="text-brand-orange">PROCURA?</span></h2>
+                    <h2 className="text-2xl md:text-4xl font-black text-white uppercase tracking-tighter">O QUE VOCÊ <span className="text-brand-orange">PROCURA?</span></h2>
                     <p className="text-white/40 font-bold uppercase tracking-widest text-[10px]">Explore nosso catálogo especializado</p>
                   </div>
                 </div>
@@ -3073,7 +3112,7 @@ export default function App() {
               </div>
 
               {/* Price Range in Mega Filter */}
-              <div className="mb-12 bg-white/5 p-8 rounded-[2.5rem] border border-white/10 flex flex-col md:flex-row items-center gap-8">
+              <div className="mb-12 bg-white/5 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-white/10 flex flex-col md:flex-row items-center gap-8">
                 <div className="flex-1 space-y-4 w-full">
                   <span className="text-brand-orange text-[10px] font-black uppercase tracking-[0.3em] ml-2">Faixa de Investimento</span>
                   <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -3142,7 +3181,7 @@ export default function App() {
                     setShowMegaFilter(false);
                     document.getElementById('properties')?.scrollIntoView({ behavior: 'smooth' });
                   }}
-                  className="px-12 py-5 bg-white text-black rounded-full font-black uppercase tracking-widest text-xs hover:bg-brand-orange hover:text-white transition-all shadow-2xl"
+                  className="px-8 md:px-12 py-4 md:py-5 bg-white text-black rounded-full font-black uppercase tracking-widest text-[10px] md:text-xs hover:bg-brand-orange hover:text-white transition-all shadow-2xl"
                 >
                   Ver Todos os Imóveis sem Filtro
                 </button>
@@ -3351,7 +3390,7 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.6 }}
                 >
-                  <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="w-full btn-primary !h-20 !text-xl flex items-center justify-center uppercase tracking-widest font-black">
+                  <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="w-full btn-primary !h-16 md:!h-20 !text-lg md:!text-xl flex items-center justify-center uppercase tracking-widest font-black">
                     Fale Conosco
                   </a>
                 </motion.div>
@@ -3382,8 +3421,16 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* --- Hero Section --- */}
-      <section className="relative h-screen flex items-center pt-20 overflow-hidden">
+      <AnimatePresence>
+        {!isLoading && (
+          <motion.div
+            key="main-content"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1, ease: "easeOut" }}
+          >
+            {/* --- Hero Section --- */}
+            <section className="relative h-screen flex items-center pt-20 overflow-hidden">
         <div className="absolute inset-0 z-0">
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent z-10" />
           <img 
@@ -3414,18 +3461,18 @@ export default function App() {
                 Arquitetura, luxo e o endereço que você sempre sonhou.
               </p>
               <div className="flex flex-col sm:flex-row gap-6 mb-12">
-                <a href="#properties" className="btn-primary !px-10 !py-5 text-lg group">
+                <a href="#properties" className="btn-primary !px-6 md:!px-10 !py-4 md:!py-5 text-base md:text-lg group">
                   Explorar Imóveis 
                   <ChevronRight className="group-hover:translate-x-1 transition-transform" />
                 </a>
                 <a 
                   href="#contact"
                   onClick={handlePropertyRegistrationClick}
-                  className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-10 py-5 rounded-full font-bold transition-all border border-white/10 flex items-center justify-center gap-3 group"
+                  className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-6 md:px-10 py-4 md:py-5 rounded-full font-bold transition-all border border-white/10 flex items-center justify-center gap-3 group"
                 >
                   {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
-                  <div className="w-8 h-8 rounded-full bg-brand-orange flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Plus size={16} className="text-white" />
+                  <div className="w-6 h-6 md:w-8 h-8 rounded-full bg-brand-orange flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Plus size={14} md:size={16} className="text-white" />
                   </div>
                 </a>
               </div>
@@ -3654,7 +3701,7 @@ export default function App() {
       </section>
 
       {/* --- Featured Highlights --- */}
-      <section className="py-32 bg-white relative overflow-hidden">
+      <section className="py-16 md:py-32 bg-white relative overflow-hidden">
         <div className="absolute top-0 right-0 w-1/2 h-full bg-slate-50/50 -skew-x-12 translate-x-20" />
         <div className="container mx-auto px-6 relative z-10">
           <div className="grid md:grid-cols-2 gap-16 items-center">
@@ -3662,9 +3709,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95 }}
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
-              className="relative group p-4 border border-brand-orange/10 rounded-[3rem] -rotate-1 group-hover:rotate-0 transition-all duration-700"
+              className="relative group p-4 border border-brand-orange/10 rounded-3xl md:rounded-[3rem] -rotate-1 group-hover:rotate-0 transition-all duration-700"
             >
-              <div className="relative rounded-[2.5rem] overflow-hidden aspect-video shadow-2xl">
+                <div className="relative rounded-3xl md:rounded-[2.5rem] overflow-hidden aspect-video shadow-2xl">
                 <img 
                   src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?q=80&w=1974&auto=format&fit=crop" 
                   alt="Highlight House"
@@ -3683,7 +3730,7 @@ export default function App() {
                 <div className="w-10 h-[2px] bg-brand-orange" />
                 <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Lifestyle Sorocaba</span>
               </div>
-              <h2 className="text-4xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
+              <h2 className="text-3xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
               <p className="text-slate-500 text-lg leading-relaxed font-medium">
                 Nossa missão transcende a simples venda de imóveis. Entregamos curadoria, exclusividade e segurança jurídica para que sua única preocupação seja aproveitar o novo lar.
               </p>
@@ -3716,12 +3763,12 @@ export default function App() {
       </section>
 
       {/* --- Property Listing --- */}
-      <section id="properties" className="py-32 bg-[#fcfcfc] border-y border-slate-100">
+      <section id="properties" className="py-20 md:py-32 bg-[#fcfcfc] border-y border-slate-100">
         <div className="container mx-auto px-6">
           <div className="flex flex-col md:flex-row justify-between items-center mb-20 gap-8 text-center md:text-left">
             <div className="flex flex-col items-center md:items-start">
               <span className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px] block mb-4 border-l-4 border-brand-orange pl-4 leading-none">Oportunidades</span>
-              <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter leading-none">SELEÇÃO <span className="text-brand-orange">PREMIUM</span></h2>
+              <h2 className="text-3xl md:text-7xl font-black uppercase tracking-tighter leading-none">SELEÇÃO <span className="text-brand-orange">PREMIUM</span></h2>
             </div>
             <div className="flex items-center space-x-4">
               {currentUser && (
@@ -3748,7 +3795,7 @@ export default function App() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
             {isLoading ? (
-              <div className="col-span-full py-32 flex flex-col items-center justify-center text-center space-y-6">
+                <div className="col-span-full py-20 md:py-32 flex flex-col items-center justify-center text-center space-y-6">
                 <div className="relative">
                   <div className="w-20 h-20 border-4 border-slate-100 border-t-brand-orange rounded-full animate-spin" />
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -3775,7 +3822,7 @@ export default function App() {
                 </div>
               ))
             ) : (
-              <div className="col-span-full py-32 text-center bg-white rounded-[3.5rem] border-2 border-dashed border-slate-100">
+                <div className="col-span-full py-20 md:py-32 text-center bg-white rounded-[2rem] md:rounded-[3.5rem] border-2 border-dashed border-slate-100">
                 <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-8 text-slate-300">
                   <Search size={40} />
                 </div>
@@ -3820,7 +3867,7 @@ export default function App() {
             viewport={{ once: true }}
             className="max-w-3xl mx-auto"
           >
-            <h2 className="text-4xl md:text-7xl font-bold text-white mb-8">Pronto para dar o próximo passo?</h2>
+            <h2 className="text-3xl md:text-7xl font-bold text-white mb-8">Pronto para dar o próximo passo?</h2>
             <p className="text-xl text-white/70 mb-12 leading-relaxed">
               Agende agora uma consultoria personalizada com um de nossos corretores especialistas em alto padrão.
             </p>
@@ -3828,11 +3875,11 @@ export default function App() {
               <a 
                 href="#contact"
                 onClick={handlePropertyRegistrationClick}
-                className="btn-primary text-xl px-12 py-5 shadow-orange-500/10"
+                className="btn-primary text-lg md:text-xl px-8 md:px-12 py-4 md:py-5 shadow-orange-500/10"
               >
                 {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
               </a>
-              <button className="bg-transparent border-2 border-white/30 text-white hover:border-white transition-colors px-12 py-5 rounded-full font-bold text-xl">
+              <button className="bg-transparent border-2 border-white/30 text-white hover:border-white transition-colors px-8 md:px-12 py-4 md:py-5 rounded-full font-bold text-lg md:text-xl">
                 Baixar Catálogo PDF
               </button>
             </div>
@@ -3849,7 +3896,7 @@ export default function App() {
               <span className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px]">Private Collection</span>
               <div className="w-12 h-[2px] bg-brand-orange" />
             </div>
-            <h2 className="text-4xl md:text-6xl font-black mb-4 tracking-tighter uppercase">Destaques <span className="text-brand-orange">Premium</span></h2>
+            <h2 className="text-3xl md:text-6xl font-black mb-4 tracking-tighter uppercase">Destaques <span className="text-brand-orange">Premium</span></h2>
             <p className="text-slate-500 font-medium italic">Inegavelmente extraordinários. Incomparavelmente exclusivos.</p>
           </div>
           
@@ -3865,7 +3912,7 @@ export default function App() {
                   className="flex flex-col md:flex-row items-center gap-10 md:gap-20"
                 >
                   <div className="w-full md:w-3/5 relative">
-                    <div className="aspect-[16/9] rounded-[3.5rem] overflow-hidden shadow-[0_50px_100px_rgba(0,0,0,0.15)] relative group">
+                    <div className="aspect-[16/9] rounded-3xl md:rounded-[3.5rem] overflow-hidden shadow-[0_50px_100px_rgba(0,0,0,0.15)] relative group">
                       <img 
                         src={featuredProperties[featuredIndex]?.image} 
                         alt={featuredProperties[featuredIndex]?.title} 
@@ -3911,7 +3958,7 @@ export default function App() {
                             setSelectedPropertyForVisit(featuredProperties[featuredIndex]);
                             setIsVisitModalOpen(true);
                           }}
-                          className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 transition-all duration-300 !py-6 !px-10 text-lg flex items-center justify-center gap-4 group/btn shadow-[0_20px_40px_rgba(255,92,0,0.3)] rounded-[2rem] text-white"
+                          className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 transition-all duration-300 !py-4 md:!py-6 !px-8 md:!px-10 text-base md:text-lg flex items-center justify-center gap-4 group/btn shadow-[0_20px_40px_rgba(255,92,0,0.3)] rounded-2xl md:rounded-[2rem] text-white"
                         >
                           <span className="font-black tracking-widest uppercase">Agendar Visita VIP</span>
                           <Calendar size={20} className="group-hover/btn:scale-110 transition-transform" />
@@ -3924,7 +3971,7 @@ export default function App() {
                 <motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="py-20 text-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-100"
+                  className="py-20 text-center bg-slate-50 rounded-3xl md:rounded-[3rem] border-2 border-dashed border-slate-100"
                 >
                   <p className="text-slate-400 font-bold uppercase tracking-[0.2em]">Selecione alguns imóveis como destaque para aparecerem aqui</p>
                 </motion.div>
@@ -4021,7 +4068,7 @@ export default function App() {
       {/* --- Testimonials --- */}
       <section className="py-20 md:py-32 bg-white">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="bg-black rounded-[2.5rem] md:rounded-[4rem] p-8 md:p-16 lg:p-24 relative overflow-hidden shadow-[0_100px_150px_rgba(0,0,0,0.4)]">
+          <div className="bg-black rounded-3xl md:rounded-[4rem] p-8 md:p-16 lg:p-24 relative overflow-hidden shadow-[0_100px_150px_rgba(0,0,0,0.4)]">
             <div className="absolute -top-10 -right-10 opacity-5 text-[15rem] md:text-[25rem] font-black leading-none select-none text-white tracking-tighter">"</div>
             <div className="relative z-10 grid lg:grid-cols-3 gap-12 lg:gap-16">
               <div className="lg:col-span-1 lg:border-r border-white/5 lg:pr-12">
@@ -4029,7 +4076,7 @@ export default function App() {
                    <div className="w-12 h-[2px] bg-brand-orange" />
                    <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Client Feedback</span>
                 </div>
-                <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-white mb-6 md:mb-8 leading-tight tracking-tighter uppercase">VOZES DA <br /><span className="text-brand-orange">CONFIANÇA</span></h2>
+                <h2 className="text-2xl md:text-4xl lg:text-5xl font-black text-white mb-6 md:mb-8 leading-tight tracking-tighter uppercase">VOZES DA <br /><span className="text-brand-orange">CONFIANÇA</span></h2>
                 <div className="flex space-x-1 text-brand-orange mb-6 md:mb-10 text-xl md:text-2xl">
                   <Star fill="currentColor" size={20} />
                   <Star fill="currentColor" size={20} />
@@ -4069,7 +4116,7 @@ export default function App() {
                  <div className="w-12 h-[2px] bg-brand-orange" />
                  <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">VIP Private Consulting</span>
               </div>
-              <h2 className="text-4xl md:text-6xl lg:text-8xl font-black mb-10 leading-[0.9] tracking-tighter uppercase font-sans">VAMOS <span className="text-brand-orange drop-shadow-[0_0_15px_rgba(255,92,0,0.2)] tracking-widest">CONSTRUIR</span> SEU LEGADO.</h2>
+              <h2 className="text-3xl md:text-6xl lg:text-7xl font-black mb-10 leading-[0.9] tracking-tighter uppercase font-sans">VAMOS <span className="text-brand-orange drop-shadow-[0_0_15px_rgba(255,92,0,0.2)] tracking-widest">CONSTRUIR</span> SEU LEGADO.</h2>
               <p className="text-xl text-slate-500 mb-14 leading-relaxed font-medium">
                 Nossa assessoria vai além da transação. Oferecemos um serviço 360º para investidores e famílias que exigem o máximo de sofisticação e segurança.
               </p>
@@ -4107,14 +4154,14 @@ export default function App() {
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
             <span className="text-brand-orange font-bold uppercase tracking-widest text-sm mb-4 block">Nossa Localização</span>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">Expertise na Região de Sorocaba</h2>
-            <p className="text-slate-600 max-w-2xl mx-auto italic font-serif">
+            <h2 className="text-2xl md:text-5xl font-bold mb-6">Expertise na Região de Sorocaba</h2>
+            <p className="text-sm md:text-base text-slate-600 max-w-2xl mx-auto italic font-serif">
               Explore o mapa e filtre por regiões específicas para encontrar as melhores oportunidades.
             </p>
           </div>
 
           {/* Local Map Filters */}
-          <div className="mb-10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative">
+          <div className="mb-10 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 bg-slate-50 p-4 md:p-6 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm relative">
             <div className="space-y-2">
               <label className="text-[10px] uppercase tracking-widest font-bold text-slate-400 ml-2">Cidade</label>
               <select 
@@ -4196,7 +4243,7 @@ export default function App() {
           </div>
 
           <div className="grid lg:grid-cols-3 gap-10">
-            <div className="lg:col-span-2 rounded-[3.5rem] overflow-hidden shadow-2xl h-[600px] border-4 border-white relative group z-10">
+              <div className="bg-white rounded-3xl md:rounded-[2.5rem] overflow-hidden shadow-2xl h-[400px] md:h-[600px] border-4 border-white relative group z-10">
               <PropertyMap properties={filteredProperties} />
             </div>
             
@@ -4273,7 +4320,7 @@ export default function App() {
                     loginWithGoogle();
                     setIsLoginModalOpen(false);
                   }}
-                  className="w-full btn-primary !h-20 !text-xl flex items-center justify-center gap-4 group"
+                  className="w-full btn-primary !h-16 md:!h-20 !text-lg md:!text-xl flex items-center justify-center gap-4 group"
                 >
                   <Shield size={24} className="group-hover:scale-110 transition-transform" />
                   <span className="font-black uppercase tracking-widest">Acessar via Google</span>
@@ -4358,7 +4405,7 @@ export default function App() {
                   placeholder="Seu melhor e-mail" 
                   className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange text-white font-bold placeholder:text-white/20 transition-all text-sm"
                 />
-                <button className="w-full btn-primary !py-5 uppercase text-[10px] tracking-widest font-black rounded-2xl">SOLICITAR ACESSO</button>
+                <button className="w-full btn-primary !py-4 md:!py-5 uppercase text-[10px] tracking-widest font-black rounded-2xl">SOLICITAR ACESSO</button>
               </form>
             </div>
           </div>
@@ -4382,6 +4429,9 @@ export default function App() {
           </div>
         </div>
       </footer>
-    </div>
-  );
+    </motion.div>
+  )}
+</AnimatePresence>
+</div>
+);
 }
