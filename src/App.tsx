@@ -3379,7 +3379,7 @@ export default function App() {
             transition={{ duration: 1, ease: "easeOut" }}
           >
             {/* --- Hero Section --- */}
-            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-center pt-32 pb-20 md:pt-40 overflow-hidden">
+            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-start md:items-center pt-48 pb-20 md:pt-20 overflow-hidden">
         <motion.div 
           initial={{ scale: 1.1 }}
           animate={{ scale: 1 }}
@@ -3396,14 +3396,18 @@ export default function App() {
           />
         </motion.div>
 
-            <div className="container mx-auto px-6 relative z-20">
+        <div className="container mx-auto px-6 relative z-20">
           <div className="max-w-4xl">
             <motion.div
               initial={{ opacity: 0, x: -30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.8 }}
             >
-              <h1 className="text-5xl md:text-7xl lg:text-9xl text-white font-black leading-[1] md:leading-[0.85] mb-6 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+              <div className="flex items-center space-x-3 mb-4 md:mb-6">
+                <div className="h-[1.5px] w-10 md:w-12 bg-brand-orange" />
+                <span className="text-brand-orange font-bold uppercase tracking-[0.3em] text-[10px] md:text-xs">Exclusividade em Sorocaba</span>
+              </div>
+              <h1 className="text-4xl md:text-7xl lg:text-9xl text-white font-black leading-[1] md:leading-[0.85] mb-6 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
                 SUA PRÓXIMA <br className="hidden md:block" />
                 <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>CONQUISTA</span>
               </h1>
