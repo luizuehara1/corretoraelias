@@ -11,6 +11,7 @@ import {
   BedDouble, 
   Bath, 
   Maximize, 
+  Car,
   Phone, 
   Mail, 
   Clock, 
@@ -80,7 +81,7 @@ import {
   updateVisitStatus,
   deleteVisit
 } from './lib/firebase';
-import { exportReportToPDF } from './lib/pdfExport';
+import { exportReportToPDF, generateFullCatalogPDF } from './lib/pdfExport';
 import { sendVisitConfirmationNotification } from './services/notificationService';
 
 // --- Config ---
@@ -371,26 +372,26 @@ function VisitRegistrationOverlay({
       className="fixed inset-0 z-[110] bg-black/95 backdrop-blur-3xl p-4 md:p-10 flex flex-col overflow-hidden"
     >
       <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
-        <div className="flex justify-between items-center mb-12">
-          <div className="flex items-center space-x-6 text-white group cursor-pointer" onClick={onClose}>
-            <div className="w-16 h-16 bg-brand-orange rounded-3xl flex items-center justify-center shadow-[0_0_30px_rgba(255,92,0,0.4)]">
-              <Calendar size={32} />
+        <div className="flex justify-between items-center mb-6 md:mb-12">
+          <div className="flex items-center space-x-4 md:space-x-6 text-white group cursor-pointer" onClick={onClose}>
+            <div className="w-12 h-12 md:w-16 md:h-16 bg-brand-orange rounded-2xl md:rounded-3xl flex items-center justify-center shadow-[0_0_30px_rgba(255,92,0,0.4)]">
+              <Calendar size={24} className="md:w-8 md:h-8" />
             </div>
             <div>
-              <h2 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-none">Visita <span className="text-brand-orange">VIP</span></h2>
-              <p className="text-white/40 text-sm font-bold tracking-[0.2em]">{property.title}</p>
+              <h2 className="text-xl md:text-4xl font-black tracking-tighter uppercase leading-none">Visita <span className="text-brand-orange">VIP</span></h2>
+              <p className="text-white/40 text-[10px] md:text-sm font-bold tracking-[0.2em] truncate max-w-[150px] md:max-w-none">{property.title}</p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="w-16 h-16 bg-white/5 hover:bg-white/10 text-white rounded-full flex items-center justify-center transition-all border border-white/10 hover:border-brand-orange group"
+            className="w-12 h-12 md:w-16 md:h-16 bg-white/5 hover:bg-white/10 text-white rounded-full flex items-center justify-center transition-all border border-white/10 hover:border-brand-orange group"
           >
-            <X size={32} className="group-hover:rotate-90 transition-transform duration-500" />
+            <X size={24} className="md:w-8 md:h-8 group-hover:rotate-90 transition-transform duration-500" />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto no-scrollbar pb-10">
-          <div className="grid lg:grid-cols-2 gap-16 items-start">
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-start">
             {/* Property Preview Card */}
             <div className="hidden lg:block space-y-8 sticky top-0 group">
               <div className="rounded-3xl md:rounded-[3rem] overflow-hidden shadow-2xl border border-white/5 relative">
@@ -428,51 +429,51 @@ function VisitRegistrationOverlay({
             </div>
 
             {/* Visit Form */}
-            <div className="bg-white rounded-3xl md:rounded-[3.5rem] p-10 md:p-16 shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/5 rounded-bl-full" />
+            <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] p-6 md:p-16 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 md:w-32 h-24 md:h-32 bg-brand-orange/5 rounded-bl-full" />
               
-              <form onSubmit={handleSubmit} className="relative z-10 space-y-8">
-                <div className="space-y-6">
-                  <div className="space-y-3">
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 ml-2">Identificação</label>
+              <form onSubmit={handleSubmit} className="relative z-10 space-y-6 md:space-y-8">
+                <div className="space-y-4 md:space-y-6">
+                  <div className="space-y-2 md:space-y-3">
+                    <label className="text-[9px] md:text-[10px] uppercase tracking-[0.2em] md:tracking-[0.3em] font-black text-slate-400 ml-2">Identificação</label>
                     <input 
                       required
                       type="text" 
                       placeholder="NOME COMPLETO"
-                      className="w-full bg-slate-50 border-2 border-transparent rounded-[1.5rem] px-8 py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-lg font-bold placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border-2 border-transparent rounded-2xl md:rounded-[1.5rem] px-6 md:px-8 py-4 md:py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-base md:text-lg font-bold placeholder:text-slate-300"
                       value={formData.name}
                       onChange={e => setFormData({...formData, name: e.target.value})}
                     />
                   </div>
-                  <div className="space-y-3">
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 ml-2">WhatsApp de Contato</label>
+                  <div className="space-y-2 md:space-y-3">
+                    <label className="text-[9px] md:text-[10px] uppercase tracking-[0.2em] md:tracking-[0.3em] font-black text-slate-400 ml-2">WhatsApp de Contato</label>
                     <input 
                       required
                       type="tel" 
                       placeholder="(15) 00000-0000"
-                      className="w-full bg-slate-50 border-2 border-transparent rounded-[1.5rem] px-8 py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-lg font-bold placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border-2 border-transparent rounded-2xl md:rounded-[1.5rem] px-6 md:px-8 py-4 md:py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-base md:text-lg font-bold placeholder:text-slate-300"
                       value={formData.phone}
                       onChange={e => setFormData({...formData, phone: e.target.value})}
                     />
                   </div>
                   
-                  <div className="space-y-3">
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 ml-2">Data da Visita</label>
+                  <div className="space-y-2 md:space-y-3">
+                    <label className="text-[9px] md:text-[10px] uppercase tracking-[0.2em] md:tracking-[0.3em] font-black text-slate-400 ml-2">Data da Visita</label>
                     <input 
                       required
                       type="date" 
-                      className="w-full bg-slate-50 border-2 border-transparent rounded-[1.5rem] px-8 py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-lg font-bold"
+                      className="w-full bg-slate-50 border-2 border-transparent rounded-2xl md:rounded-[1.5rem] px-6 md:px-8 py-4 md:py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-base md:text-lg font-bold"
                       value={formData.date}
                       min={new Date().toISOString().split('T')[0]}
                       onChange={e => setFormData({...formData, date: e.target.value, time: ''})}
                     />
                   </div>
 
-                  <div className={`space-y-3 transition-all duration-500 ${formData.date ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 ml-2">
+                  <div className={`space-y-2 md:space-y-3 transition-all duration-500 ${formData.date ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                    <label className="text-[9px] md:text-[10px] uppercase tracking-[0.2em] md:tracking-[0.3em] font-black text-slate-400 ml-2">
                       {formData.date ? 'Escolha um Horário Disponível' : 'Selecione uma Data para ver horários'}
                     </label>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 md:gap-3">
                       {TIME_SLOTS.map(time => {
                         const occupied = formData.date ? isSlotOccupied(formData.date, time) : false;
                         return (
@@ -481,9 +482,9 @@ function VisitRegistrationOverlay({
                             type="button"
                             disabled={occupied || !formData.date}
                             onClick={() => setFormData({ ...formData, time })}
-                            className={`py-3 rounded-xl text-sm font-bold transition-all border-2 ${
+                            className={`py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-bold transition-all border-2 ${
                               formData.time === time 
-                                ? 'bg-brand-orange border-brand-orange text-white shadow-lg shadow-orange-500/30' 
+                                ? 'bg-brand-orange border-brand-orange text-white shadow-md md:shadow-lg shadow-orange-500/30' 
                                 : occupied 
                                   ? 'bg-slate-100 border-transparent text-slate-300 cursor-not-allowed opacity-50' 
                                   : 'bg-slate-50 border-transparent text-slate-600 hover:border-brand-orange/30'
@@ -494,37 +495,36 @@ function VisitRegistrationOverlay({
                         );
                       })}
                     </div>
-                    {formData.date && <p className="text-[10px] text-slate-400 font-bold uppercase mt-2">* Visitas agendadas em intervalos de 1 hora.</p>}
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 ml-2">Mensagem (Opcional)</label>
+                  <div className="space-y-2 md:space-y-3">
+                    <label className="text-[9px] md:text-[10px] uppercase tracking-[0.2em] md:tracking-[0.3em] font-black text-slate-400 ml-2">Mensagem (Opcional)</label>
                     <textarea 
-                      rows={3}
+                      rows={2}
                       placeholder="DESEJA ALGUM FOCO ESPECÍFICO?"
-                      className="w-full bg-slate-50 border-2 border-transparent rounded-[1.5rem] px-8 py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-lg font-bold resize-none placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border-2 border-transparent rounded-2xl md:rounded-[1.5rem] px-6 md:px-8 py-4 md:py-5 outline-none focus:border-brand-orange focus:bg-white transition-all text-base md:text-lg font-bold resize-none placeholder:text-slate-300"
                       value={formData.message}
                       onChange={e => setFormData({...formData, message: e.target.value})}
                     />
                   </div>
                 </div>
 
-                <div className="pt-4">
+                <div className="pt-2 md:pt-4">
                   {status === 'error' && (
-                    <div className="bg-red-50 text-red-600 p-4 rounded-xl text-xs font-bold mb-4 text-center border border-red-100">
+                    <div className="bg-red-50 text-red-600 p-3 md:p-4 rounded-xl text-[10px] md:text-xs font-bold mb-4 text-center border border-red-100">
                       Ocorreu um erro ao salvar seu agendamento. Por favor, tente novamente ou fale conosco via WhatsApp.
                     </div>
                   )}
 
                   {!formData.time && (
-                    <p className="text-center text-brand-orange text-[10px] font-black uppercase tracking-widest mb-4 animate-pulse">
+                    <p className="text-center text-brand-orange text-[9px] md:text-[10px] font-black uppercase tracking-widest mb-3 md:mb-4 animate-pulse">
                       {formData.date ? 'Selecione um horário disponível para agendar' : 'Selecione uma data e horário para agendar'}
                     </p>
                   )}
                   <button 
                     disabled={status === 'loading' || !formData.time}
                     type="submit" 
-                    className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 !py-6 !rounded-[2rem] text-xl flex items-center justify-center space-x-4 shadow-[0_20px_40px_rgba(255,92,0,0.3)] group/btn disabled:opacity-50 disabled:grayscale transition-all duration-300"
+                    className="w-full bg-gradient-to-r from-brand-orange to-red-600 hover:scale-105 !py-4 md:!py-6 !rounded-2xl md:!rounded-[2rem] text-lg md:text-xl flex items-center justify-center space-x-3 md:space-x-4 shadow-[0_15px_30px_rgba(255,92,0,0.3)] group/btn disabled:opacity-50 disabled:grayscale transition-all duration-300"
                   >
                     {status === 'loading' ? (
                       <span className="flex items-center gap-3">
@@ -580,29 +580,29 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
       className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-3xl p-4 md:p-10 flex flex-col overflow-hidden"
     >
       <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
-        <div className="flex justify-between items-center mb-8 md:mb-12">
-          <div className="flex items-center space-x-6 text-white">
-            <div className="w-16 h-16 bg-brand-orange rounded-3xl flex items-center justify-center shadow-[0_0_30px_rgba(255,92,0,0.4)]">
-              <Eye size={32} />
+        <div className="flex justify-between items-center mb-6 md:mb-12">
+          <div className="flex items-center space-x-4 md:space-x-6 text-white">
+            <div className="w-12 h-12 md:w-16 md:h-16 bg-brand-orange rounded-2xl md:rounded-3xl flex items-center justify-center shadow-[0_0_30px_rgba(255,92,0,0.4)]">
+              <Eye size={24} className="md:w-8 md:h-8" />
             </div>
             <div>
-              <h2 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-none">Visualização <span className="text-brand-orange">Detalhada</span></h2>
-              <p className="text-white/40 text-sm font-bold tracking-[0.2em]">{property.title}</p>
+              <h2 className="text-xl md:text-4xl font-black tracking-tighter uppercase leading-none">Visualização <span className="text-brand-orange">Detalhada</span></h2>
+              <p className="text-white/40 text-[10px] md:text-sm font-bold tracking-[0.2em] truncate max-w-[150px] md:max-w-none">{property.title}</p>
             </div>
           </div>
           <button 
             onClick={onClose}
-            className="w-16 h-16 bg-white/5 hover:bg-white/10 text-white rounded-full flex items-center justify-center transition-all border border-white/10 hover:border-brand-orange group"
+            className="w-12 h-12 md:w-16 md:h-16 bg-white/5 hover:bg-white/10 text-white rounded-full flex items-center justify-center transition-all border border-white/10 hover:border-brand-orange group"
           >
-            <X size={32} className="group-hover:rotate-90 transition-transform duration-500" />
+            <X size={24} className="md:w-8 md:h-8 group-hover:rotate-90 transition-transform duration-500" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-12">
-          <div className="grid lg:grid-cols-2 gap-12 lg:gap-20">
+        <div className="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-8 md:space-y-12">
+          <div className="grid lg:grid-cols-2 gap-8 md:gap-12 lg:gap-20">
             {/* Gallery Carousel Section */}
-            <div className="space-y-6">
-              <div className="relative group rounded-3xl md:rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3] bg-white/5">
+            <div className="space-y-4 md:space-y-6">
+              <div className="relative group rounded-2xl md:rounded-[3rem] overflow-hidden border border-white/10 shadow-2xl aspect-[4/3] bg-white/5">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={currentMediaIndex}
@@ -687,79 +687,78 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
             </div>
 
             {/* Info Section */}
-            <div className="space-y-10 text-white">
-              <div className="space-y-4">
-                <div className="flex items-center space-x-3 text-brand-orange font-black uppercase tracking-widest text-xs">
-                  <span className="bg-brand-orange/10 border border-brand-orange/20 px-3 py-1 rounded-full">{property.purpose}</span>
-                  <span className="bg-white/10 border border-white/10 px-3 py-1 rounded-full">{property.category}</span>
+            <div className="space-y-6 md:space-y-10 text-white">
+              <div className="space-y-3 md:space-y-4">
+                <div className="flex flex-wrap items-center gap-2 md:gap-3 text-brand-orange font-black uppercase tracking-widest text-[9px] md:text-xs">
+                  <span className="bg-brand-orange/10 border border-brand-orange/20 px-2.5 md:px-3 py-1 rounded-full">{property.purpose}</span>
+                  <span className="bg-white/10 border border-white/10 px-2.5 md:px-3 py-1 rounded-full">{property.category}</span>
                   {property.propertyType && (
-                    <span className="bg-white/10 border border-white/10 px-3 py-1 rounded-full">{property.propertyType}</span>
+                    <span className="bg-white/10 border border-white/10 px-2.5 md:px-3 py-1 rounded-full">{property.propertyType}</span>
                   )}
-                  <span className="bg-white/5 border border-white/10 px-3 py-1 rounded-full opacity-60 italic">{property.type}</span>
                 </div>
-                <h3 className="text-4xl md:text-5xl font-black tracking-tighter leading-none">{property.title}</h3>
-                <div className="flex items-center text-white/40 font-bold uppercase tracking-widest text-xs">
-                  <MapPin size={16} className="mr-2 text-brand-orange" />
+                <h3 className="text-3xl md:text-5xl font-black tracking-tighter leading-none">{property.title}</h3>
+                <div className="flex items-center text-white/40 font-bold uppercase tracking-widest text-[10px] md:text-xs">
+                  <MapPin size={14} className="mr-2 text-brand-orange md:w-4 md:h-4" />
                   {property.neighborhood}, {property.city}
                 </div>
               </div>
 
-              <div className="bg-white/5 rounded-3xl p-8 border border-white/5 grid grid-cols-2 md:grid-cols-4 gap-8">
+              <div className="bg-white/5 rounded-2xl md:rounded-3xl p-6 md:p-8 border border-white/5 grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
                 <div className="space-y-1">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.2em]">Área Total</p>
-                  <p className="text-lg font-bold">{property.area}</p>
+                  <p className="text-white/30 text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em]">Área Total</p>
+                  <p className="text-base md:text-lg font-bold">{property.area}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.2em]">Dormitórios</p>
-                  <p className="text-lg font-bold">{property.beds || 0}</p>
+                  <p className="text-white/30 text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em]">Dormitórios</p>
+                  <p className="text-base md:text-lg font-bold">{property.beds || 0}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.2em]">Suítes</p>
-                  <p className="text-lg font-bold">{property.suites || 0}</p>
+                  <p className="text-white/30 text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em]">Suítes</p>
+                  <p className="text-base md:text-lg font-bold">{property.suites || 0}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.2em]">Banheiros</p>
-                  <p className="text-lg font-bold">{property.baths || 0}</p>
+                  <p className="text-white/30 text-[9px] md:text-[10px] font-black uppercase tracking-[0.2em]">Banheiros</p>
+                  <p className="text-base md:text-lg font-bold">{property.baths || 0}</p>
                 </div>
               </div>
 
               {property.description && (
-                <div className="space-y-4">
-                  <h4 className="text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Descrição do Imóvel</h4>
+                <div className="space-y-3 md:space-y-4">
+                  <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Descrição do Imóvel</h4>
                   <p className="text-white/70 leading-relaxed text-sm whitespace-pre-wrap">{property.description}</p>
                 </div>
               )}
               
-              <div className="space-y-6">
-                <h4 className="text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Valores e Condições</h4>
-                <div className="flex items-end gap-4">
-                  <span className="text-4xl md:text-5xl font-black tracking-tighter">{property.price}</span>
-                  <span className="text-white/40 text-sm mb-2 font-bold italic">/ Investimento</span>
+              <div className="space-y-4 md:space-y-6">
+                <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Valores e Condições</h4>
+                <div className="flex flex-col sm:flex-row sm:items-end gap-1 sm:gap-4">
+                  <span className="text-3xl md:text-5xl font-black tracking-tighter">{property.price}</span>
+                  <span className="text-white/40 text-[10px] md:text-sm mb-1 sm:mb-2 font-bold italic">/ Investimento</span>
                 </div>
                 
                 {property.condominium && (
-                   <div className="flex items-center text-white/60 font-bold italic">
+                   <div className="flex items-center text-white/60 font-bold italic text-xs md:text-sm">
                      <span className="mr-2 opacity-50">• Condomínio:</span>
                      {property.condominium} {property.condoValue ? `(${property.condoValue})` : ''}
                    </div>
                 )}
                 
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${property.acceptsFinancing ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,44,44,0.5)]'}`} />
-                  <span className="text-sm font-bold uppercase tracking-widest opacity-70">
+                  <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${property.acceptsFinancing ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,44,44,0.5)]'}`} />
+                  <span className="text-[10px] md:text-sm font-bold uppercase tracking-widest opacity-70">
                     {property.acceptsFinancing ? 'Aceita Financiamento' : 'Não Aceita Financiamento'}
                   </span>
                 </div>
               </div>
 
-              <div className="pt-8 border-t border-white/10 grid grid-cols-2 gap-4">
-                <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-2">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">Garagem Coberta</p>
-                  <p className="text-xl font-bold">{property.parkingCovered || 0} Vagas</p>
+              <div className="pt-6 md:pt-8 border-t border-white/10 grid grid-cols-2 gap-3 md:gap-4">
+                <div className="bg-white/5 p-4 md:p-6 rounded-xl md:rounded-2xl border border-white/5 space-y-1 md:space-y-2">
+                  <p className="text-white/30 text-[8px] md:text-[10px] font-black uppercase tracking-widest">Garagem Coberta</p>
+                  <p className="text-lg md:text-xl font-bold">{property.parkingCovered || 0} Vagas</p>
                 </div>
-                <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-2">
-                  <p className="text-white/30 text-[10px] font-black uppercase tracking-widest">Garagem Aberta</p>
-                  <p className="text-xl font-bold">{property.parkingUncovered || 0} Vagas</p>
+                <div className="bg-white/5 p-4 md:p-6 rounded-xl md:rounded-2xl border border-white/5 space-y-1 md:space-y-2">
+                  <p className="text-white/30 text-[8px] md:text-[10px] font-black uppercase tracking-widest">Garagem Aberta</p>
+                  <p className="text-lg md:text-xl font-bold">{property.parkingUncovered || 0} Vagas</p>
                 </div>
               </div>
             </div>
@@ -1844,21 +1843,16 @@ function AdminPortal({
         {/* Property List Table - Only for Admin */}
         {isAuthorized && (
           <div className="bg-white/5 border border-white/10 rounded-3xl md:rounded-[2.5rem] overflow-hidden">
-            <div className="p-8 border-b border-white/10 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-white">
-                {activeTab === 'inventory' ? 'Suas Propriedades Cadastradas' : 
-                 activeTab === 'submissions' ? 'Solicitações Recebidas' : 'Visitas Agendadas e Bloqueios'}
+            <div className="p-4 md:p-8 border-b border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
+              <h3 className="text-base md:text-xl font-bold text-white uppercase tracking-tighter">
+                {activeTab === 'inventory' ? 'Suas Propriedades' : 
+                 activeTab === 'submissions' ? 'Solicitações' : 'Visitas e Bloqueios'}
               </h3>
-              <div className="flex gap-4">
-                <span className="bg-brand-orange/20 text-brand-orange text-xs font-bold px-3 py-1 rounded-full uppercase tracking-widest">
+              <div className="flex gap-3 md:gap-4">
+                <span className="bg-brand-orange/20 text-brand-orange text-[9px] md:text-xs font-bold px-3 py-1 rounded-full uppercase tracking-widest">
                   {activeTab === 'inventory' ? `${properties.length} Ativas` : 
                    activeTab === 'submissions' ? `${submissions.length} Pendentes` : `${scheduledVisits.length} Visitas`}
                 </span>
-                {activeTab === 'visits' && (
-                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-widest">
-                    {blockedSlots.length} Bloqueios
-                  </span>
-                )}
               </div>
             </div>
             <div className="overflow-x-auto no-scrollbar">
@@ -1867,86 +1861,89 @@ function AdminPortal({
                   <tr className="border-b border-white/5">
                     {activeTab === 'visits' ? (
                       <>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Data/Hora</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Cliente</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Imóvel</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 text-right">Ações</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Data/Hora</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Cliente</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 hidden md:table-cell">Imóvel</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 text-right">Ações</th>
                       </>
                     ) : (
                       <>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Imóvel</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Local</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Valor</th>
-                        <th className="p-6 text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 text-right">Ações</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Imóvel</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 hidden sm:table-cell">Local</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30">Valor</th>
+                        <th className="p-4 md:p-6 text-[9px] md:text-[10px] uppercase tracking-[0.2em] font-bold text-white/30 text-right">Ações</th>
                       </>
                     )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {activeTab === 'inventory' ? properties.map(p => (
-                    /* ... existing row content ... */
                     <tr key={p.id} className="hover:bg-white/5 transition-colors group">
-                      <td className="p-6">
-                        <div className="flex items-center space-x-4">
-                          <img src={p.image} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                      <td className="p-4 md:p-6">
+                        <div className="flex items-center space-x-3 md:space-x-4">
+                          <img src={p.image} className="w-10 h-10 md:w-12 md:h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
                           <div>
-                            <p className="text-white font-bold">{p.title}</p>
-                            <p className="text-white/40 text-xs">{p.type} • {p.area}</p>
+                            <p className="text-white font-bold text-xs md:text-base leading-none mb-1">{p.title}</p>
+                            <p className="text-white/40 text-[9px] md:text-xs">{p.type} • {p.area}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="p-6 text-white/60 text-sm">{p.location}</td>
-                      <td className="p-6 font-bold text-brand-orange" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.priceValue)}>{p.price}</td>
-                      <td className="p-6 text-right">
-                        <div className="flex items-center justify-end space-x-3">
+                      <td className="p-4 md:p-6 text-white/60 text-xs md:text-sm hidden sm:table-cell">{p.location}</td>
+                      <td className="p-4 md:p-6 font-bold text-brand-orange text-xs md:text-base" title={new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.priceValue)}>{p.price}</td>
+                      <td className="p-4 md:p-6 text-right">
+                        <div className="flex items-center justify-end space-x-1 md:space-x-3">
                           <button 
                             onClick={() => setViewingProperty(p)}
-                            className="text-white/30 hover:text-white hover:bg-white/10 p-3 rounded-xl transition-all"
+                            className="text-white/30 hover:text-white hover:bg-white/10 p-2 md:p-3 rounded-lg md:rounded-xl transition-all"
                             title="Visualizar"
                           >
-                            <Eye size={18} />
+                            <Eye size={16} md:size={18} />
                           </button>
                           <button 
                             onClick={() => handleEdit(p)}
-                            className="text-brand-orange/50 hover:text-brand-orange hover:bg-brand-orange/10 p-3 rounded-xl transition-all"
+                            className="text-brand-orange/50 hover:text-brand-orange hover:bg-brand-orange/10 p-2 md:p-3 rounded-lg md:rounded-xl transition-all"
                             title="Editar"
                           >
-                            <Settings size={18} />
+                            <Settings size={16} md:size={18} />
                           </button>
                           <button 
-                            onClick={() => onDeleteProperty(p.id)}
-                            className="text-red-400/50 hover:text-red-400 hover:bg-red-400/10 p-3 rounded-xl transition-all"
+                            onClick={() => {
+                              if (confirm("Deseja realmente excluir este imóvel?")) {
+                                onDeleteProperty(p.id);
+                              }
+                            }}
+                            className="text-red-400/50 hover:text-red-400 hover:bg-red-400/10 p-2 md:p-3 rounded-lg md:rounded-xl transition-all"
                             title="Excluir"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} md:size={18} />
                           </button>
                         </div>
                       </td>
                     </tr>
                   )) : activeTab === 'submissions' ? submissions.map(s => (
                     <tr key={s.id} className="hover:bg-white/5 transition-colors group">
-                      <td className="p-6">
-                        <div className="flex items-center space-x-4">
-                          <img src={s.image} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                      <td className="p-4 md:p-6">
+                        <div className="flex items-center space-x-3 md:space-x-4">
+                          <img src={s.image} className="w-10 h-10 md:w-12 md:h-12 rounded-lg object-cover" referrerPolicy="no-referrer" />
                           <div>
-                            <p className="text-white font-bold">{s.title}</p>
-                            <p className="text-white/40 text-xs">{s.type} • {s.area}</p>
+                            <p className="text-white font-bold text-xs md:text-base leading-none mb-1">{s.title}</p>
+                            <p className="text-white/40 text-[9px] md:text-xs">{s.type} • {s.area}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="p-6 text-white/60 text-sm">{s.neighborhood}, {s.city}</td>
-                      <td className="p-6 font-bold text-brand-orange">{s.price}</td>
-                      <td className="p-6 text-right">
-                        <div className="flex items-center justify-end space-x-3">
+                      <td className="p-4 md:p-6 text-white/60 text-xs md:text-sm hidden sm:table-cell">{s.neighborhood}, {s.city}</td>
+                      <td className="p-4 md:p-6 font-bold text-brand-orange text-xs md:text-base">{s.price}</td>
+                      <td className="p-4 md:p-6 text-right">
+                        <div className="flex items-center justify-end space-x-2 md:space-x-3">
                           <button 
                             onClick={() => handleApprove(s)}
-                            className="bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white px-4 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all"
+                            className="bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-[8px] md:text-[10px] uppercase tracking-widest transition-all"
                           >
                             Aprovar
                           </button>
                           <button 
                             onClick={() => handleReject(s.id)}
-                            className="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-4 py-2 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all"
+                            className="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold text-[8px] md:text-[10px] uppercase tracking-widest transition-all"
                           >
                             Recusar
                           </button>
@@ -1955,51 +1952,50 @@ function AdminPortal({
                     </tr>
                   )) : (
                     <>
-                      {/* Mixed rows for visits and blocked slots order by date */}
                       {[
                         ...scheduledVisits.map(v => ({...v, adminType: 'visit'})),
                         ...blockedSlots.map(s => ({...s, adminType: 'blocked'}))
                       ].sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time)).map((item, idx) => (
                         <tr key={idx} className={`hover:bg-white/5 transition-colors group ${item.adminType === 'blocked' ? 'bg-red-500/5' : ''}`}>
-                          <td className="p-6">
-                            <div className="flex items-center space-x-3">
-                              {item.adminType === 'blocked' ? <Shield size={16} className="text-red-400" /> : <Calendar size={16} className="text-brand-orange" />}
+                          <td className="p-4 md:p-6">
+                            <div className="flex items-center space-x-2 md:space-x-3">
+                              {item.adminType === 'blocked' ? <Shield size={14} md:size={16} className="text-red-400" /> : <Calendar size={14} md:size={16} className="text-brand-orange" />}
                               <div>
-                                <p className="text-white font-bold">{item.date.split('-').reverse().join('/')}</p>
-                                <p className="text-white/40 text-xs">{item.time}h</p>
+                                <p className="text-white font-bold text-xs md:text-base leading-none mb-1">{item.date.split('-').reverse().join('/')}</p>
+                                <p className="text-white/40 text-[9px] md:text-xs">{item.time}h</p>
                               </div>
                             </div>
                           </td>
-                          <td className="p-6">
+                          <td className="p-4 md:p-6">
                             {item.adminType === 'blocked' ? (
-                              <span className="text-red-400/60 font-medium italic">Horário Bloqueado: {item.reason || 'S/ Motivo'}</span>
+                              <span className="text-red-400/60 font-medium italic text-[10px] md:text-sm">Bloqueado: {item.reason || 'S/ Motivo'}</span>
                             ) : (
                               <div>
-                                <p className="text-white font-bold">{item.name}</p>
+                                <p className="text-white font-bold text-xs md:text-base leading-none mb-1">{item.name}</p>
                                 <div className="flex items-center gap-2">
-                                  <p className="text-white/40 text-xs">{item.phone}</p>
+                                  <p className="text-white/40 text-[9px] md:text-xs">{item.phone}</p>
                                   <a href={`https://wa.me/${item.phone.replace(/\D/g, '')}`} target="_blank" className="text-green-400 hover:text-green-300">
-                                    <MessageCircle size={12} />
+                                    <MessageCircle size={10} md:size={12} />
                                   </a>
                                 </div>
                               </div>
                             )}
                           </td>
-                          <td className="p-6">
+                          <td className="p-4 md:p-6 hidden md:table-cell">
                             <p className="text-white/60 text-sm truncate max-w-[200px]">{item.propertyName || item.reason || '-'}</p>
                           </td>
-                          <td className="p-6 text-right">
+                          <td className="p-4 md:p-6 text-right">
                              {item.adminType === 'blocked' ? (
                                <button 
                                  onClick={() => onUnblockSlot && onUnblockSlot(item.id)}
-                                 className="text-red-400 hover:text-red-300 font-bold text-[10px] uppercase tracking-widest"
+                                 className="text-red-400 hover:text-red-300 font-bold text-[8px] md:text-[10px] uppercase tracking-widest underline underline-offset-4"
                                >
-                                 Remover Bloqueio
+                                 Remover
                                </button>
                              ) : (
-                               <div className="flex items-center justify-end space-x-2">
+                               <div className="flex items-center justify-end space-x-1 md:space-x-2">
                                  {statusUpdating === item.id ? (
-                                   <div className="p-2"><Loader2 className="animate-spin text-white/20" size={16} /></div>
+                                   <div className="p-2"><Loader2 className="animate-spin text-white/20" size={14} md:size={16} /></div>
                                  ) : (
                                    <>
                                      {item.status !== 'confirmed' && (
@@ -2012,26 +2008,10 @@ function AdminPortal({
                                              setStatusUpdating(null);
                                            }
                                          }}
-                                         className="bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white p-2 rounded-lg transition-all"
-                                         title="Confirmar Visita"
+                                         className="bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white p-1.5 md:p-2 rounded-lg transition-all"
+                                         title="Confirmar"
                                        >
-                                         <Check size={16} />
-                                       </button>
-                                     )}
-                                     {item.status === 'confirmed' && (
-                                       <button 
-                                         onClick={async () => {
-                                           setStatusUpdating(item.id);
-                                           try {
-                                             await onUpdateVisitStatus?.(item.id, 'pending');
-                                           } finally {
-                                             setStatusUpdating(null);
-                                           }
-                                         }}
-                                         className="bg-brand-orange/10 text-brand-orange hover:bg-brand-orange hover:text-white p-2 rounded-lg transition-all"
-                                         title="Voltar para Pendente"
-                                       >
-                                         <Clock size={16} />
+                                         <Check size={14} md:size={16} />
                                        </button>
                                      )}
                                    </>
@@ -2042,18 +2022,11 @@ function AdminPortal({
                                        onDeleteVisit && onDeleteVisit(item.id);
                                      }
                                    }}
-                                   className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white p-2 rounded-lg transition-all"
-                                   title="Excluir Agendamento"
+                                   className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white p-1.5 md:p-2 rounded-lg transition-all"
+                                   title="Excluir"
                                  >
-                                   <Trash2 size={16} />
+                                   <Trash2 size={14} md:size={16} />
                                  </button>
-                                 <div className="ml-2">
-                                   {item.status === 'confirmed' ? (
-                                     <span className="text-green-500 text-[10px] uppercase font-bold tracking-widest bg-green-500/10 px-2 py-1 rounded">Confirmada</span>
-                                   ) : (
-                                     <span className="text-brand-orange text-[10px] uppercase font-bold tracking-widest bg-brand-orange/10 px-2 py-1 rounded">Pendente</span>
-                                   )}
-                                 </div>
                                </div>
                              )}
                           </td>
@@ -2189,22 +2162,24 @@ function PropertyCard({
     <motion.div 
       initial={{ opacity: 0, y: 30 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      className="bg-white rounded-2xl md:rounded-[2rem] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.05)] hover:shadow-[0_30px_60px_rgba(0,0,0,0.12)] transition-all duration-700 group border border-slate-100 cursor-pointer relative"
+      whileHover={{ y: -10 }}
+      viewport={{ once: true, margin: "-100px" }}
+      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+      className="bg-white rounded-[2.5rem] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.02)] hover:shadow-[0_40px_80px_rgba(0,0,0,0.1)] transition-all duration-700 group border border-slate-100/50 hover:border-brand-orange/20 cursor-pointer relative"
     >
-      <div className="relative h-72 overflow-hidden" onClick={() => onSelect(property)}>
-        <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-all duration-500 z-10" />
+      <div className="relative aspect-[4/3] overflow-hidden" onClick={() => onSelect(property)}>
+        <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-all duration-500 z-10" />
         <img 
           src={property.image} 
           alt={property.title} 
           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-[1.5s] ease-out"
           referrerPolicy="no-referrer"
         />
-        <div className="absolute top-6 left-6 z-20 flex gap-2">
-          <span className="bg-black/80 backdrop-blur-md text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/10">
+        <div className="absolute top-4 md:top-6 left-4 md:left-6 z-20 flex flex-col gap-2">
+          <span className="bg-black/80 backdrop-blur-md text-white px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest border border-white/10 w-fit">
             {property.purpose === 'Locação' ? 'Locação' : 'Venda'}
           </span>
-          <span className="bg-white/90 backdrop-blur-md text-brand-dark px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/10">
+          <span className="bg-white/90 backdrop-blur-md text-brand-dark px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest border border-white/10 w-fit">
             {property.propertyType || property.type}
           </span>
         </div>
@@ -2215,95 +2190,64 @@ function PropertyCard({
             e.stopPropagation();
             onToggleFavorite(String(property.id));
           }}
-          className={`absolute top-6 right-6 z-30 w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-xl border ${
+          className={`absolute top-4 md:top-6 right-4 md:right-6 z-30 w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center transition-all backdrop-blur-xl border ${
             isFavorite 
               ? 'bg-brand-orange text-white border-brand-orange shadow-lg shadow-orange-500/30' 
               : 'bg-white/10 text-white border-white/20 hover:bg-white hover:text-brand-orange'
           }`}
         >
-          <Star size={20} fill={isFavorite ? "currentColor" : "none"} />
+          <Star size={18} md:size={20} fill={isFavorite ? "currentColor" : "none"} />
         </button>
       </div>
       
-      <div className="p-6 md:p-8">
-        <div className="flex justify-between items-start mb-4 md:mb-6">
-          <div>
-            <h3 className="text-xl md:text-2xl font-bold text-brand-dark mb-1 md:mb-2 tracking-tight group-hover:text-brand-orange transition-colors">
-              {property.title}
-            </h3>
-            <div className="flex items-center text-slate-400 text-[10px] md:text-sm font-medium italic">
-              <MapPin size={14} className="mr-1 text-brand-orange md:w-4 md:h-4" />
-              {property.location}
-            </div>
+      <div className="p-5 md:p-8">
+        <div className="flex flex-col mb-4 md:mb-6">
+          <div className="flex items-center text-slate-400 text-[9px] md:text-sm font-medium italic mb-1 md:mb-2">
+            <MapPin size={12} md:size={14} className="mr-1 text-brand-orange md:w-4 md:h-4" />
+            {property.location}
           </div>
-          <div className="relative">
-            <p 
-              onMouseEnter={() => setIsHoveringPrice(true)}
-              onMouseLeave={() => setIsHoveringPrice(false)}
-              className="text-xl font-black text-brand-orange tracking-tight cursor-help hover:text-brand-dark transition-colors"
-            >
-              {property.price}
-            </p>
-            <AnimatePresence>
-              {isHoveringPrice && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 5, scale: 0.95 }}
-                  className="absolute bottom-full right-0 mb-3 px-4 py-2 bg-brand-dark text-white text-[10px] font-bold rounded-xl shadow-2xl z-50 whitespace-nowrap pointer-events-none border border-white/10"
-                >
-                  <div className="flex flex-col items-center">
-                    <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(property.priceValue)}</span>
-                    <div className="absolute top-[100%] right-4 w-2 h-2 bg-brand-dark rotate-45 -mt-1" />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          <h3 className="text-lg md:text-2xl font-black text-brand-dark tracking-tighter uppercase leading-tight group-hover:text-brand-orange transition-colors">
+            {property.title}
+          </h3>
+        </div>
+
+        <div className="flex items-center gap-3 mb-6">
+          <p className="text-xl md:text-3xl font-black text-brand-orange tracking-tighter uppercase">
+            {property.price}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 py-4 md:py-6 border-y border-slate-50">
+          <div className="flex flex-col items-center p-2 rounded-xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <BedDouble className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={12} md:size={14} />
+            <span className="text-[8px] md:text-[10px] font-bold text-slate-900">{property.beds || 0}</span>
+          </div>
+          <div className="flex flex-col items-center p-2 rounded-xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <Bath className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={12} md:size={14} />
+            <span className="text-[8px] md:text-[10px] font-bold text-slate-900">{property.suites || 0}</span>
+          </div>
+          <div className="flex flex-col items-center p-2 rounded-xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <Car className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={12} md:size={14} />
+            <span className="text-[8px] md:text-[10px] font-bold text-slate-900">{(property.parkingCovered || 0) + (property.parkingUncovered || 0)}</span>
+          </div>
+          <div className="flex flex-col items-center p-2 rounded-xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
+            <Maximize className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={12} md:size={14} />
+            <span className="text-[8px] md:text-[10px] font-bold text-slate-900">{property.areaUseful || property.area}</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 py-5 md:py-6 border-t border-slate-50">
-          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <BedDouble className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
-            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.beds || 0} Dorm</span>
-          </div>
-          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <Bath className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
-            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.suites || 0} Suítes</span>
-          </div>
-          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors">
-            <Home className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
-            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{(property.parkingCovered || 0) + (property.parkingUncovered || 0)} Vagas</span>
-          </div>
-          <div className="flex flex-col items-center p-2.5 md:p-3 rounded-2xl bg-slate-50/50 group-hover:bg-orange-50 transition-colors cursor-help" title={`Total: ${property.areaTotal || property.area} / Útil: ${property.areaUseful || property.area}`}>
-            <Maximize className="text-brand-orange mb-1 group-hover:scale-110 transition-transform" size={14} />
-            <span className="text-[9px] md:text-[10px] font-bold text-slate-900">{property.areaUseful || property.area}</span>
-          </div>
-        </div>
-
-        <div className="flex justify-between items-center mt-6 pt-6 border-t border-slate-50">
+        <div className="flex justify-between items-center mt-6 md:mt-8">
           <button 
             onClick={(e) => { e.stopPropagation(); onSelect(property); }}
-            className="text-brand-dark font-black text-xs uppercase tracking-widest flex items-center gap-2 group/btn"
+            className="w-full btn-primary !h-14 !text-[10px] uppercase tracking-[0.2em] font-black flex items-center justify-center gap-2 group/btn relative overflow-hidden"
           >
-            Agendar Visita <ChevronRight size={16} className="text-brand-orange group-hover/btn:translate-x-1 transition-transform" />
+            <span className="relative z-10 flex items-center">
+              Agendar Visita <ChevronRight size={14} className="text-white group-hover/btn:translate-x-2 transition-transform ml-2" />
+            </span>
+            <div className="absolute inset-0 bg-white/10 -translate-x-full group-hover/btn:translate-x-0 transition-transform duration-500" />
           </button>
-          
-          <div className="flex -space-x-2">
-            {[1,2].map(i => (
-              <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-slate-200 overflow-hidden">
-                <img src={`https://i.pravatar.cc/100?img=${i+10}`} className="w-full h-full object-cover" />
-              </div>
-            ))}
-            <div className="w-8 h-8 rounded-full bg-brand-dark flex items-center justify-center text-white text-[8px] font-bold border-2 border-white">
-              +12
-            </div>
-          </div>
         </div>
       </div>
-      
-      {/* Detail Accent */}
-      <div className="absolute bottom-0 left-0 w-0 h-1 bg-brand-orange group-hover:w-full transition-all duration-700" />
     </motion.div>
   );
 }
@@ -2443,112 +2387,111 @@ function ContactForm() {
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white p-12 rounded-3xl md:rounded-[3rem] shadow-2xl text-center"
+        className="bg-white p-12 md:p-16 rounded-[2.5rem] md:rounded-[4rem] shadow-[0_50px_100px_rgba(0,0,0,0.1)] text-center relative overflow-hidden"
       >
-        <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle2 size={48} />
+        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <div className="w-24 h-24 bg-brand-orange/10 text-brand-orange rounded-full flex items-center justify-center mx-auto mb-8 animate-bounce">
+          <CheckCircle2 size={56} />
         </div>
-        <h3 className="text-3xl font-bold mb-4">Mensagem Enviada!</h3>
-        <p className="text-slate-600 mb-8 italic">Seu consultor entrará em contato em breve para realizar seu sonho.</p>
+        <h3 className="text-3xl md:text-5xl font-black mb-6 uppercase tracking-tighter">CONTATO SOLICITADO</h3>
+        <p className="text-slate-500 mb-10 text-lg leading-relaxed font-medium">Sua mensagem foi entregue diretamente ao nosso concierge privado. Em instantes, entraremos em contato.</p>
         <button 
           onClick={() => setStatus('idle')}
-          className="btn-secondary"
+          className="px-10 py-5 rounded-full bg-brand-dark text-white font-black uppercase tracking-widest text-[10px] hover:bg-brand-orange transition-all shadow-xl shadow-black/10 flex items-center justify-center mx-auto gap-3"
         >
-          Enviar Outra Mensagem
+          <ArrowRight className="rotate-180" size={16} /> <span>Enviar Outra Mensagem</span>
         </button>
       </motion.div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-8 md:p-12 rounded-3xl md:rounded-[3rem] shadow-2xl space-y-6 border border-slate-100">
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Nome Completo</label>
-          <input 
-            required
-            type="text" 
-            placeholder="Ex: João Silva"
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all"
-            value={formData.name}
-            onChange={e => setFormData({...formData, name: e.target.value})}
-          />
+    <form onSubmit={handleSubmit} className="bg-white p-8 md:p-14 rounded-[2.5rem] md:rounded-[4rem] shadow-[0_50px_100px_rgba(0,0,0,0.08)] space-y-8 border border-slate-50 relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-brand-orange to-red-600" />
+      <div className="space-y-8">
+        <div className="grid md:grid-cols-2 gap-8">
+          <div className="space-y-3 group">
+            <label className="text-[10px] uppercase tracking-[0.4em] font-black text-slate-400 ml-4 group-focus-within:text-brand-orange transition-colors">Nome Completo</label>
+            <div className="relative">
+              <input 
+                required
+                type="text" 
+                placeholder="Ex: Alexander von Noble"
+                className="w-full bg-slate-50/50 border-2 border-slate-50 rounded-2xl px-6 py-5 outline-none focus:border-brand-orange/20 focus:bg-white transition-all font-black text-brand-dark placeholder:text-slate-300 placeholder:font-medium"
+                value={formData.name}
+                onChange={e => setFormData({...formData, name: e.target.value})}
+              />
+            </div>
+          </div>
+          <div className="space-y-3 group">
+            <label className="text-[10px] uppercase tracking-[0.4em] font-black text-slate-400 ml-4 group-focus-within:text-brand-orange transition-colors">Assessoria Requerida</label>
+            <div className="relative">
+              <select 
+                className="w-full bg-slate-50/50 border-2 border-slate-50 rounded-2xl px-6 py-5 outline-none focus:border-brand-orange/20 focus:bg-white transition-all font-black text-brand-dark cursor-pointer appearance-none uppercase tracking-widest text-[10px]"
+                value={formData.interest}
+                onChange={e => setFormData({...formData, interest: e.target.value})}
+              >
+                <option value="Comprar">Aquisição de Ativos</option>
+                <option value="Vender">Venda & Desinvestimento</option>
+                <option value="Investimento">Consultoria Estratégica</option>
+              </select>
+              <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-20"><Plus size={16} /></div>
+            </div>
+          </div>
         </div>
-        <div className="space-y-2">
-          <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">E-mail Corporativo</label>
-          <input 
-            required
-            type="email" 
-            placeholder="contato@empresa.com"
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all"
-            value={formData.email}
-            onChange={e => setFormData({...formData, email: e.target.value})}
-          />
-        </div>
-      </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="space-y-2">
-          <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">WhatsApp / Telefone</label>
-          <input 
-            required
-            type="tel" 
-            placeholder="(11) 99999-9999"
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all"
-            value={formData.phone}
-            onChange={e => setFormData({...formData, phone: e.target.value})}
-          />
+        <div className="grid md:grid-cols-2 gap-8">
+          <div className="space-y-3 group">
+            <label className="text-[10px] uppercase tracking-[0.4em] font-black text-slate-400 ml-4 group-focus-within:text-brand-orange transition-colors">WhatsApp Direct</label>
+            <input 
+              required
+              type="tel" 
+              placeholder="(15) 99999-9999"
+              className="w-full bg-slate-50/50 border-2 border-slate-50 rounded-2xl px-6 py-5 outline-none focus:border-brand-orange/20 focus:bg-white transition-all font-black text-brand-dark placeholder:text-slate-300 placeholder:font-medium"
+              value={formData.phone}
+              onChange={e => setFormData({...formData, phone: e.target.value})}
+            />
+          </div>
+          <div className="space-y-3 group">
+            <label className="text-[10px] uppercase tracking-[0.4em] font-black text-slate-400 ml-4 group-focus-within:text-brand-orange transition-colors">Canal de E-mail</label>
+            <input 
+              required
+              type="email" 
+              placeholder="private@luxury.com"
+              className="w-full bg-slate-50/50 border-2 border-slate-50 rounded-2xl px-6 py-5 outline-none focus:border-brand-orange/20 focus:bg-white transition-all font-black text-brand-dark placeholder:text-slate-300 placeholder:font-medium"
+              value={formData.email}
+              onChange={e => setFormData({...formData, email: e.target.value})}
+            />
+          </div>
         </div>
-        <div className="space-y-2">
-          <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Interesse Principal</label>
-          <select 
-            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange transition-all appearance-none"
-            value={formData.interest}
-            onChange={e => setFormData({...formData, interest: e.target.value})}
-          >
-            <option value="Comprar">Quero Comprar</option>
-            <option value="Vender">Quero Vender</option>
-            <option value="Investir">Quero Investir</option>
-            <option value="Consultoria">Consultoria Personalizada</option>
-          </select>
-        </div>
-      </div>
 
-      <div className="space-y-2">
-        <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Como podemos ajudar?</label>
-        <textarea 
-          rows={4}
-          placeholder="Descreva seu projeto ou imóvel de interesse..."
-          className="w-full bg-slate-50 border border-slate-100 rounded-3xl px-6 py-4 outline-none focus:border-brand-orange transition-all resize-none"
-          value={formData.message}
-          onChange={e => setFormData({...formData, message: e.target.value})}
-        />
+        <div className="space-y-3 group">
+          <label className="text-[10px] uppercase tracking-[0.4em] font-black text-slate-400 ml-4 group-focus-within:text-brand-orange transition-colors">Considerações Privadas</label>
+          <textarea 
+            required
+            placeholder="Descreva brevemente sua expectativa..."
+            className="w-full bg-slate-50/50 border-2 border-slate-50 rounded-2xl px-6 py-5 outline-none focus:border-brand-orange/20 focus:bg-white transition-all font-black text-brand-dark h-48 resize-none placeholder:text-slate-300 placeholder:font-medium leading-relaxed"
+            value={formData.message}
+            onChange={e => setFormData({...formData, message: e.target.value})}
+          ></textarea>
+        </div>
       </div>
 
       <button 
+        type="submit" 
         disabled={status === 'loading'}
-        className="w-full btn-primary py-4 md:py-5 text-lg md:text-xl flex items-center justify-center space-x-3 disabled:opacity-50"
+        className="w-full btn-primary !h-20 !rounded-2xl md:!rounded-[1.5rem] !text-xs !bg-brand-dark uppercase tracking-[0.6em] font-black flex items-center justify-center gap-4 group/btn relative overflow-hidden disabled:opacity-50 shadow-2xl shadow-black/20"
       >
-        {status === 'loading' ? (
-          <>
-            <Loader2 className="animate-spin" />
-            <span>Processando...</span>
-          </>
-        ) : (
-          <>
-            <Send size={20} />
-            <span>Solicitar Contato Exclusivo</span>
-          </>
-        )}
+        <span className="relative z-10 flex items-center">
+          {status === 'loading' ? 'SOLICITANDO...' : 'INICIAR ASSESSORIA PRIVADA'}
+          <ArrowRight className="group-hover/btn:translate-x-2 transition-transform ml-4" />
+        </span>
+        <div className="absolute inset-0 bg-brand-orange -translate-x-full group-hover/btn:translate-x-0 transition-transform duration-700" />
       </button>
-
-      {status === 'error' && (
-        <p className="text-red-500 text-sm text-center font-medium">Ocorreu um erro ao enviar. Por favor, tente novamente.</p>
-      )}
-
-      <p className="text-[10px] text-slate-400 text-center leading-tight mt-4">
-        Ao enviar, você concorda com nossos termos de privacidade. Seus dados estão protegidos por criptografia de ponta a ponta.
-      </p>
+      
+      <div className="flex items-center justify-center space-x-6 pt-4 grayscale opacity-30 group-hover:grayscale-0 group-hover:opacity-100 transition-all">
+         <Shield size={16} /> <span className="text-[8px] font-black tracking-widest uppercase">Encryption 256-bit Secure</span>
+      </div>
     </form>
   );
 }
@@ -3192,17 +3135,23 @@ export default function App() {
       </AnimatePresence>
 
       {/* --- Navbar --- */}
-      <nav className={`fixed top-0 left-0 w-full z-40 transition-all duration-700 ${isScrolled ? 'py-3 bg-black/80 backdrop-blur-2xl border-b border-white/5 shadow-2xl' : 'py-6 bg-transparent'}`}>
+      <nav className={`fixed top-0 left-0 w-full z-40 transition-all duration-700 ${isScrolled ? 'py-4 bg-black/40 backdrop-blur-3xl border-b border-white/5 shadow-[0_20px_80px_rgba(0,0,0,0.5)]' : 'py-5 md:py-8 bg-transparent'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
-          <div className="flex items-center space-x-3 group cursor-pointer">
-            <div className="w-12 h-12 bg-brand-orange flex items-center justify-center rounded-2xl shadow-[0_8px_20px_rgba(255,92,0,0.3)] rotate-3 group-hover:rotate-0 transition-all duration-500">
-              <Home className="text-white -rotate-3 group-hover:rotate-0 transition-all duration-500" />
+          <div 
+             className="flex items-center space-x-4 group cursor-pointer"
+             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
+            <div className="relative">
+              <div className="w-12 h-12 bg-brand-orange flex items-center justify-center rounded-2xl shadow-[0_10px_30px_rgba(255,92,0,0.4)] rotate-6 group-hover:rotate-0 transition-all duration-500 transform hover:scale-110">
+                <Home className="text-white -rotate-6 group-hover:rotate-0 transition-all duration-500" />
+              </div>
+              <div className="absolute -inset-1 bg-brand-orange/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
             <span className="flex flex-col">
-              <span className={`text-2xl font-black tracking-tighter leading-none ${isScrolled ? 'text-white' : 'text-white'}`}>
-                RB <span className="text-brand-orange">SOROCABA</span>
+              <span className="text-2xl md:text-3xl font-black tracking-tighter leading-none text-white uppercase">
+                RB <span className="text-brand-orange group-hover:tracking-widest transition-all duration-500">SOROCABA</span>
               </span>
-              <span className={`text-[9px] font-bold tracking-[0.4em] uppercase opacity-40 ${isScrolled ? 'text-white' : 'text-white'}`}>NEGÓCIOS IMOBILIÁRIOS</span>
+              <span className="text-[8px] md:text-[9px] font-black tracking-[0.5em] uppercase opacity-40 text-white leading-none mt-1">NEGÓCIOS IMOBILIÁRIOS</span>
             </span>
           </div>
 
@@ -3316,7 +3265,7 @@ export default function App() {
                     transition={{ delay: 0.1 + i * 0.1 }}
                     href={link.href}
                     onClick={() => setMobileMenuOpen(false)}
-                    className="text-4xl font-black text-white hover:text-brand-orange transition-all tracking-tighter uppercase leading-none"
+                    className="text-3xl md:text-4xl font-black text-white hover:text-brand-orange transition-all tracking-tighter uppercase leading-none"
                   >
                     {link.label}
                   </motion.a>
@@ -3330,14 +3279,14 @@ export default function App() {
                   {isAuthorized ? (
                     <button 
                       onClick={() => { setIsAdminOpen(true); setMobileMenuOpen(false); }} 
-                      className="text-3xl font-black text-brand-orange text-left uppercase tracking-tighter mt-4"
+                      className="text-2xl md:text-3xl font-black text-brand-orange text-left uppercase tracking-tighter mt-4"
                     >
                       Painel Admin
                     </button>
                   ) : (
                     <button 
                       onClick={(e) => { handlePropertyRegistrationClick(e); setMobileMenuOpen(false); }} 
-                      className="text-3xl font-black text-brand-orange text-left uppercase tracking-tighter mt-4"
+                      className="text-2xl md:text-3xl font-black text-brand-orange text-left uppercase tracking-tighter mt-4"
                     >
                       Anunciar Imóvel
                     </button>
@@ -3430,69 +3379,74 @@ export default function App() {
             transition={{ duration: 1, ease: "easeOut" }}
           >
             {/* --- Hero Section --- */}
-            <section className="relative h-screen flex items-center pt-20 overflow-hidden">
-        <div className="absolute inset-0 z-0">
+            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-center pt-32 pb-20 md:pt-48 overflow-hidden">
+        <motion.div 
+          initial={{ scale: 1.1 }}
+          animate={{ scale: 1 }}
+          transition={{ duration: 2.5, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute inset-0 z-0"
+        >
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent z-10" />
+          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent z-10" />
           <img 
             src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop" 
             alt="Luxury Home"
-            className="w-full h-full object-cover scale-105 animate-[pulse_10s_ease-in-out_infinite]"
+            className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
           />
-        </div>
+        </motion.div>
 
-        <div className="container mx-auto px-6 relative z-20">
+            <div className="container mx-auto px-6 relative z-20">
           <div className="max-w-4xl">
             <motion.div
-              initial={{ opacity: 0, x: -50 }}
+              initial={{ opacity: 0, x: -30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.8 }}
             >
-              <div className="flex items-center space-x-4 mb-6">
-                <div className="h-[2px] w-12 bg-brand-orange" />
-                <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Exclusividade em Sorocaba</span>
-              </div>
-              <h1 className="text-4xl md:text-7xl lg:text-8xl text-white font-black leading-[1.1] md:leading-[0.9] mb-6 md:mb-8 tracking-tighter">
+              <h1 className="text-5xl md:text-7xl lg:text-9xl text-white font-black leading-[1] md:leading-[0.85] mb-6 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
                 SUA PRÓXIMA <br className="hidden md:block" />
-                <span className="text-brand-orange drop-shadow-[0_0_30px_rgba(255,92,0,0.3)]">CONQUISTA</span>
+                <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>CONQUISTA</span>
               </h1>
-              <p className="text-base md:text-xl text-white/70 mb-8 md:mb-10 max-w-2xl leading-relaxed font-medium">
+              <p className="text-sm md:text-xl text-white/70 mb-8 md:mb-12 max-w-2xl leading-relaxed font-medium md:border-l border-white/20 md:pl-8">
                 Curadoria especializada dos imóveis mais desejados da região. <br className="hidden md:block" />
                 Arquitetura, luxo e o endereço que você sempre sonhou.
               </p>
-              <div className="flex flex-col sm:flex-row gap-6 mb-12">
-                <a href="#properties" className="btn-primary !px-6 md:!px-10 !py-4 md:!py-5 text-base md:text-lg group">
-                  Explorar Imóveis 
-                  <ChevronRight className="group-hover:translate-x-1 transition-transform" />
+              <div className="flex flex-col sm:flex-row gap-5 md:gap-6 mb-12 md:mb-12">
+                <a href="#properties" className="btn-primary !px-6 md:!px-12 !py-4 md:!py-6 text-sm md:text-lg group relative overflow-hidden flex items-center justify-center">
+                  <span className="relative z-10 flex items-center">
+                    Explorar Imóveis 
+                    <ChevronRight className="group-hover:translate-x-2 transition-transform ml-2" />
+                  </span>
+                  <div className="absolute inset-0 bg-white/10 -translate-x-full group-hover:translate-x-0 transition-transform duration-500" />
                 </a>
                 <a 
                   href="#contact"
                   onClick={handlePropertyRegistrationClick}
-                  className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-6 md:px-10 py-4 md:py-5 rounded-full font-bold transition-all border border-white/10 flex items-center justify-center gap-3 group"
+                  className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-6 md:px-12 py-4 md:py-6 rounded-full font-black transition-all border border-white/10 flex items-center justify-center gap-3 group text-sm md:text-base ring-1 ring-white/5 hover:ring-brand-orange/40"
                 >
                   {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
-                  <div className="w-6 h-6 md:w-8 h-8 rounded-full bg-brand-orange flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Plus size={14} md:size={16} className="text-white" />
+                  <div className="w-6 h-6 md:w-10 md:h-10 rounded-full bg-brand-orange flex items-center justify-center group-hover:rotate-90 transition-transform duration-500 shadow-lg shadow-orange-500/30">
+                    <Plus size={14} md:size={18} className="text-white" />
                   </div>
                 </a>
               </div>
             </motion.div>
 
-            {/* Advanced Search Bar */}
+            {/* Advanced Search Bar - Refined for Mobile */}
             <motion.div 
-              initial={{ opacity: 0, y: 50 }}
+              initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.8 }}
-              className="bg-black/80 backdrop-blur-3xl p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.5)] flex flex-col items-stretch gap-4 md:gap-6 border border-white/5"
+              className="bg-black/90 backdrop-blur-3xl p-4 md:p-8 rounded-3xl md:rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-4 md:gap-6 border border-white/10"
             >
-              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 md:gap-6">
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-6">
                 <div className="flex-1 relative">
-                  <div className="flex items-center px-6 bg-white/5 rounded-2xl border border-white/10 py-3.5 md:py-4 group focus-within:border-brand-orange transition-all shadow-inner">
-                    <Search className="text-brand-orange mr-3 shrink-0" size={22} />
+                  <div className="flex items-center px-4 md:px-6 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-3 md:py-4 group focus-within:border-brand-orange transition-all shadow-inner">
+                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={18} md:size={22} />
                     <input 
                       type="text" 
                       placeholder="Localização, bairro ou condomínio..." 
-                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-base md:text-lg"
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-sm md:text-lg"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -3718,44 +3672,44 @@ export default function App() {
                   className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute bottom-6 left-6 bg-black p-8 rounded-[2rem] shadow-2xl z-20 flex flex-col items-center">
-                   <span className="text-brand-orange text-4xl font-black mb-1 leading-none tracking-tighter">15</span>
-                   <span className="text-white/40 text-[7px] font-black tracking-[0.3em] uppercase">Anos de Histórias</span>
+                <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 bg-black p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-2xl z-20 flex flex-col items-center">
+                   <span className="text-brand-orange text-2xl md:text-4xl font-black mb-0.5 md:mb-1 leading-none tracking-tighter">15</span>
+                   <span className="text-white/40 text-[6px] md:text-[7px] font-black tracking-[0.2em] md:tracking-[0.3em] uppercase">Anos de Histórias</span>
                 </div>
               </div>
             </motion.div>
             
-            <div className="space-y-10">
+            <div className="space-y-6 md:space-y-10">
               <div className="flex items-center space-x-4">
                 <div className="w-10 h-[2px] bg-brand-orange" />
                 <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Lifestyle Sorocaba</span>
               </div>
               <h2 className="text-3xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
-              <p className="text-slate-500 text-lg leading-relaxed font-medium">
+              <p className="text-slate-500 text-base md:text-lg leading-relaxed font-medium">
                 Nossa missão transcende a simples venda de imóveis. Entregamos curadoria, exclusividade e segurança jurídica para que sua única preocupação seja aproveitar o novo lar.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 pt-4">
-                <div className="space-y-3 group cursor-pointer p-6 rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <div className="w-12 h-12 bg-black flex items-center justify-center rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
-                    <Eye size={24} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 pt-2 md:pt-4">
+                <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
+                    <Eye size={20} md:size={24} />
                   </div>
-                  <h5 className="font-black text-xl tracking-tight">CURADORIA ELITE</h5>
-                  <p className="text-sm text-slate-400 font-medium">Imóveis selecionados um a um por nossa diretoria estratégica.</p>
+                  <h5 className="font-black text-lg md:text-xl tracking-tight">CURADORIA ELITE</h5>
+                  <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Imóveis selecionados um a um por nossa diretoria estratégica.</p>
                 </div>
-                <div className="space-y-3 group cursor-pointer p-6 rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <div className="w-12 h-12 bg-black flex items-center justify-center rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
-                    <LayoutDashboard size={24} />
+                <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                  <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
+                    <LayoutDashboard size={20} md:size={24} />
                   </div>
-                  <h5 className="font-black text-xl tracking-tight">EXPERIÊNCIA VIP</h5>
-                  <p className="text-sm text-slate-400 font-medium">Atendimento personalizado com total discrição e foco absoluto.</p>
+                  <h5 className="font-black text-lg md:text-xl tracking-tight">EXPERIÊNCIA VIP</h5>
+                  <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Atendimento personalizado com total discrição e foco absoluto.</p>
                 </div>
               </div>
               <button 
                 onClick={() => setIsHistoryOpen(true)}
-                className="btn-secondary group !px-10 !py-5 uppercase text-xs tracking-widest font-black flex items-center gap-4"
+                className="btn-secondary group !px-8 md:!px-10 !py-4 md:!py-5 uppercase text-[10px] md:text-xs tracking-widest font-black flex items-center gap-2 md:gap-4 mx-auto md:mx-0 shadow-lg"
               >
                 Nossa História 
-                <ChevronRight className="group-hover:translate-x-1 transition-transform" size={18} />
+                <ChevronRight className="group-hover:translate-x-1 transition-transform" size={16} md:size={18} />
               </button>
             </div>
           </div>
@@ -3763,21 +3717,41 @@ export default function App() {
       </section>
 
       {/* --- Property Listing --- */}
-      <section id="properties" className="py-20 md:py-32 bg-[#fcfcfc] border-y border-slate-100">
+      <section id="properties" className="py-32 md:py-48 bg-[#f9f9f9]">
         <div className="container mx-auto px-6">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-20 gap-8 text-center md:text-left">
-            <div className="flex flex-col items-center md:items-start">
-              <span className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px] block mb-4 border-l-4 border-brand-orange pl-4 leading-none">Oportunidades</span>
-              <h2 className="text-3xl md:text-7xl font-black uppercase tracking-tighter leading-none">SELEÇÃO <span className="text-brand-orange">PREMIUM</span></h2>
-            </div>
-            <div className="flex items-center space-x-4">
+          <div className="flex flex-col md:flex-row justify-between items-end mb-16 md:mb-24 gap-10">
+            <motion.div 
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="max-w-2xl text-center md:text-left"
+            >
+              <div className="flex items-center justify-center md:justify-start space-x-4 mb-6">
+                <div className="w-12 h-[2px] bg-brand-orange" />
+                <span className="text-brand-orange font-black uppercase tracking-[0.5em] text-[10px]">Curadoria Exclusiva</span>
+              </div>
+              <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
+                VITRINE <br />
+                <span className="text-transparent" style={{ WebkitTextStroke: '2px #1e293b' }}>EXTRAORDINÁRIA</span>
+              </h2>
+              <p className="text-slate-500 font-medium md:text-xl max-w-lg leading-relaxed">
+                Cada m² foi selecionado para superar as expectativas mais exigentes do mercado de alto padrão em Sorocaba.
+              </p>
+            </motion.div>
+            
+            <motion.div 
+              initial={{ opacity: 0, x: 30 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true }}
+              className="flex flex-wrap justify-center items-center gap-4 md:gap-6"
+            >
               {currentUser && (
                 <button 
                   onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
-                  className={`flex items-center space-x-3 px-8 py-4 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-black/5 border ${
+                  className={`flex items-center space-x-3 px-8 md:px-10 py-4 md:py-6 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl border-2 ${
                     showOnlyFavorites 
-                      ? 'bg-brand-orange text-white border-brand-orange' 
-                      : 'bg-white text-brand-dark border-slate-100 hover:border-brand-orange'
+                      ? 'bg-brand-orange text-white border-brand-orange shadow-orange-500/20' 
+                      : 'bg-white text-brand-dark border-transparent hover:border-brand-orange/20'
                   }`}
                 >
                   <Star size={16} fill={showOnlyFavorites ? "currentColor" : "none"} />
@@ -3786,14 +3760,15 @@ export default function App() {
               )}
               <button 
                 onClick={() => setShowMegaFilter(true)}
-                className="px-8 py-4 rounded-full bg-black text-white text-[10px] font-black uppercase tracking-widest hover:bg-brand-orange transition-all shadow-xl shadow-black/10"
+                className="group relative px-8 md:px-12 py-4 md:py-6 rounded-full bg-brand-dark text-white text-[10px] font-black uppercase tracking-widest overflow-hidden transition-all shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:shadow-orange-500/20"
               >
-                Catálogo Completo
+                <span className="relative z-10">Filtros Avançados</span>
+                <div className="absolute inset-0 bg-brand-orange translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
               </button>
-            </div>
+            </motion.div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12 md:gap-16">
             {isLoading ? (
                 <div className="col-span-full py-20 md:py-32 flex flex-col items-center justify-center text-center space-y-6">
                 <div className="relative">
@@ -3867,19 +3842,22 @@ export default function App() {
             viewport={{ once: true }}
             className="max-w-3xl mx-auto"
           >
-            <h2 className="text-3xl md:text-7xl font-bold text-white mb-8">Pronto para dar o próximo passo?</h2>
-            <p className="text-xl text-white/70 mb-12 leading-relaxed">
+            <h2 className="text-3xl md:text-7xl font-bold text-white mb-6 md:mb-8 tracking-tighter uppercase leading-none">Pronto para o próximo <span className="text-brand-orange">PASSO?</span></h2>
+            <p className="text-base md:text-xl text-white/70 mb-8 md:mb-12 leading-relaxed font-medium">
               Agende agora uma consultoria personalizada com um de nossos corretores especialistas em alto padrão.
             </p>
-            <div className="flex flex-col md:flex-row gap-6 justify-center">
+            <div className="flex flex-col sm:flex-row gap-4 md:gap-6 justify-center">
               <a 
                 href="#contact"
                 onClick={handlePropertyRegistrationClick}
-                className="btn-primary text-lg md:text-xl px-8 md:px-12 py-4 md:py-5 shadow-orange-500/10"
+                className="btn-primary text-base md:text-xl px-8 md:px-12 py-4 md:py-5 shadow-orange-500/10"
               >
                 {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
               </a>
-              <button className="bg-transparent border-2 border-white/30 text-white hover:border-white transition-colors px-8 md:px-12 py-4 md:py-5 rounded-full font-bold text-lg md:text-xl">
+              <button 
+                onClick={() => generateFullCatalogPDF(properties)}
+                className="bg-transparent border-2 border-white/30 text-white hover:bg-white hover:text-brand-orange transition-all px-8 md:px-12 py-4 md:py-5 rounded-full font-bold text-base md:text-xl uppercase tracking-widest"
+              >
                 Baixar Catálogo PDF
               </button>
             </div>
@@ -4008,56 +3986,74 @@ export default function App() {
       </div>
     </section>
 
-      {/* --- Team Section --- */}
-      <section id="team" className="py-24 bg-slate-50">
+      <section id="team" className="py-24 md:py-48 bg-[#fafafa]">
         <div className="container mx-auto px-6">
-          <div className="text-center mb-20">
-            <span className="text-brand-orange font-bold uppercase tracking-widest text-sm mb-4 block">Nossa Equipe</span>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">Mestres em Negociações</h2>
-            <p className="text-slate-600 max-w-2xl mx-auto text-lg leading-relaxed italic font-serif">
-              Unimos expertise técnica, rede de contatos poderosa e paixão por realizar sonhos.
+          <div className="flex flex-col items-center text-center mb-20 md:mb-32">
+            <motion.div 
+               initial={{ opacity: 0, scale: 0.8 }}
+               whileInView={{ opacity: 1, scale: 1 }}
+               viewport={{ once: true }}
+               className="w-16 h-16 bg-brand-orange/10 rounded-2xl flex items-center justify-center mb-8"
+            >
+               <div className="w-2 h-2 bg-brand-orange rounded-full animate-ping" />
+            </motion.div>
+            <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.8] mb-8">
+              A ELITE DO <br />
+              <span className="text-transparent" style={{ WebkitTextStroke: '1.5px #fb923c' }}>MERCADO</span>
+            </h2>
+            <p className="text-slate-500 max-w-xl mx-auto text-sm md:text-xl leading-relaxed font-medium md:border-t border-slate-200 pt-8">
+              Arquitetamos negociações de alto nível com a discrição e a expertise que seu patrimônio exige.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-12 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-12 md:gap-20 max-w-5xl mx-auto">
             {TEAM.map(member => (
               <motion.div 
                 key={member.id}
-                whileHover={{ y: -10 }}
-                className="group text-center"
+                whileHover={{ y: -15 }}
+                className="group relative"
               >
-                <div className="relative mb-8 mx-auto w-64 h-80 rounded-[2rem] overflow-hidden shadow-xl border-4 border-white">
-                  <img src={member.image} alt={member.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" referrerPolicy="no-referrer" />
-                  <div className="absolute inset-0 bg-brand-dark/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-6">
-                    {member.instagram && (
-                      <a 
-                        href={`https://instagram.com/${member.instagram}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-brand-dark hover:bg-brand-orange hover:text-white transition-colors shadow-lg"
-                      >
-                        <Instagram size={20} />
-                      </a>
-                    )}
-                    {member.whatsapp && (
-                      <a 
-                        href={`https://wa.me/${member.whatsapp}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-brand-dark hover:bg-brand-orange hover:text-white transition-colors shadow-lg"
-                      >
-                        <MessageCircle size={20} />
-                      </a>
-                    )}
-                    {!member.whatsapp && (
-                      <a href="#" className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-brand-dark hover:bg-brand-orange hover:text-white transition-colors shadow-lg"><Linkedin size={20} /></a>
-                    )}
+                <div className="relative mb-10 overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.1)] rounded-[3rem] aspect-[4/5] bg-slate-200">
+                  <img 
+                    src={member.image} 
+                    alt={member.name} 
+                    className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-110" 
+                    referrerPolicy="no-referrer" 
+                  />
+                  <div className="absolute inset-x-0 bottom-0 p-10 bg-gradient-to-t from-brand-dark/95 via-brand-dark/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700">
+                    <div className="flex justify-center space-x-6 translate-y-10 group-hover:translate-y-0 transition-transform duration-700">
+                      {member.instagram && (
+                        <a 
+                          href={`https://instagram.com/${member.instagram}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
+                        >
+                          <Instagram size={24} />
+                        </a>
+                      )}
+                      {member.whatsapp && (
+                        <a 
+                          href={`https://wa.me/${member.whatsapp}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
+                        >
+                          <MessageCircle size={24} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <div className="absolute top-8 left-8 bg-black/80 backdrop-blur-xl border border-white/10 text-white px-5 py-2 rounded-full text-[9px] font-black uppercase tracking-widest leading-none">
+                    Certified Expert
                   </div>
                 </div>
-                <h4 className="text-2xl font-bold text-brand-dark mb-1">{member.name}</h4>
-                <div className="flex flex-col items-center gap-1">
-                  <p className="text-brand-orange font-semibold uppercase tracking-widest text-xs">{member.role}</p>
-                  {member.creci && <p className="text-slate-400 text-[10px] font-bold">CRECI {member.creci}</p>}
+                <div className="text-center">
+                  <h4 className="text-2xl md:text-4xl font-black text-brand-dark mb-2 uppercase tracking-tighter">{member.name}</h4>
+                  <div className="flex flex-col items-center gap-1">
+                    <p className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px] md:text-xs bg-brand-orange/5 px-4 py-1 rounded-full">{member.role}</p>
+                    {member.creci && <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{member.creci}</p>}
+                  </div>
                 </div>
               </motion.div>
             ))}
@@ -4065,40 +4061,55 @@ export default function App() {
         </div>
       </section>
 
-      {/* --- Testimonials --- */}
-      <section className="py-20 md:py-32 bg-white">
-        <div className="container mx-auto px-4 md:px-6">
-          <div className="bg-black rounded-3xl md:rounded-[4rem] p-8 md:p-16 lg:p-24 relative overflow-hidden shadow-[0_100px_150px_rgba(0,0,0,0.4)]">
-            <div className="absolute -top-10 -right-10 opacity-5 text-[15rem] md:text-[25rem] font-black leading-none select-none text-white tracking-tighter">"</div>
-            <div className="relative z-10 grid lg:grid-cols-3 gap-12 lg:gap-16">
-              <div className="lg:col-span-1 lg:border-r border-white/5 lg:pr-12">
-                <div className="flex items-center space-x-4 mb-6">
-                   <div className="w-12 h-[2px] bg-brand-orange" />
-                   <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Client Feedback</span>
+      <section className="py-24 md:py-48 bg-white overflow-hidden">
+        <div className="container mx-auto px-6">
+          <div className="relative bg-brand-dark rounded-[3rem] md:rounded-[6rem] p-8 md:p-24 shadow-[0_100px_200px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="absolute top-0 right-0 w-full h-full opacity-10 pointer-events-none">
+              <div className="absolute top-[-10%] right-[-10%] text-[20rem] md:text-[40rem] font-black text-white/5 tracking-tighter italic">"</div>
+            </div>
+            
+            <div className="relative z-10 grid lg:grid-cols-12 gap-16 items-start">
+              <div className="lg:col-span-5">
+                <div className="flex items-center space-x-6 mb-10">
+                   <div className="w-16 h-[2px] bg-brand-orange" />
+                   <span className="text-brand-orange font-black uppercase tracking-[0.6em] text-[10px]">Testemunhos</span>
                 </div>
-                <h2 className="text-2xl md:text-4xl lg:text-5xl font-black text-white mb-6 md:mb-8 leading-tight tracking-tighter uppercase">VOZES DA <br /><span className="text-brand-orange">CONFIANÇA</span></h2>
-                <div className="flex space-x-1 text-brand-orange mb-6 md:mb-10 text-xl md:text-2xl">
-                  <Star fill="currentColor" size={20} />
-                  <Star fill="currentColor" size={20} />
-                  <Star fill="currentColor" size={20} />
-                  <Star fill="currentColor" size={20} />
-                  <Star fill="currentColor" size={20} />
+                <h2 className="text-5xl md:text-8xl font-black text-white mb-10 leading-[0.8] tracking-tighter uppercase transition-all">
+                  RELATOS DE <br />
+                  <span className="text-transparent" style={{ WebkitTextStroke: '1.5px #fb923c' }}>SUCESSO</span>
+                </h2>
+                <div className="flex space-x-2 text-brand-orange mb-12">
+                  {[...Array(5)].map((_, i) => <Star key={i} fill="currentColor" size={24} />)}
                 </div>
-                <p className="text-white/40 leading-relaxed font-medium text-[10px] uppercase tracking-widest">A relação com nossos clientes é pautada na ética, transparência e na busca incessante pela perfeição.</p>
+                <p className="text-white/40 leading-relaxed font-black text-[10px] uppercase tracking-[0.4em] max-w-xs">
+                  A satisfação dos nossos clientes é o alicerce da nossa reputação inabalável.
+                </p>
               </div>
 
-              <div className="lg:col-span-2 grid md:grid-cols-2 gap-8 md:gap-12">
-                {TESTIMONIALS.map(t => (
-                  <div key={t.id} className="group relative">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-brand-orange to-brand-dark opacity-0 group-hover:opacity-20 transition duration-1000 rounded-3xl blur" />
-                    <div className="relative bg-white/5 backdrop-blur-xl p-10 rounded-3xl border border-white/10 hover:border-white/20 transition-all flex flex-col justify-between h-full">
-                      <p className="text-white font-medium mb-10 text-xl leading-relaxed">"{t.text}"</p>
-                      <div>
-                        <h5 className="text-white font-black text-2xl tracking-tight mb-1">{t.name}</h5>
-                        <p className="text-brand-orange text-[10px] uppercase tracking-[0.4em] font-black">{t.role}</p>
+              <div className="lg:col-span-7 grid gap-10">
+                {TESTIMONIALS.map((t, idx) => (
+                  <motion.div 
+                    key={t.id}
+                    initial={{ opacity: 0, x: 50 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.2 }}
+                    className="group relative"
+                  >
+                    <div className="relative bg-white/5 backdrop-blur-3xl p-10 md:p-14 rounded-[2.5rem] border border-white/10 hover:border-brand-orange/30 transition-all duration-500">
+                      <p className="text-white font-medium mb-12 text-xl md:text-3xl leading-snug tracking-tight italic">
+                        "{t.text}"
+                      </p>
+                      <div className="flex items-center space-x-6">
+                        <div className="w-12 h-12 bg-brand-orange rounded-full flex items-center justify-center font-black text-white shadow-lg shadow-orange-500/20">
+                          {t.name.charAt(0)}
+                        </div>
+                        <div>
+                          <h5 className="text-white font-black text-2xl tracking-tighter uppercase leading-none mb-2">{t.name}</h5>
+                          <p className="text-brand-orange text-[10px] uppercase tracking-[0.5em] font-black">{t.role}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
@@ -4106,33 +4117,32 @@ export default function App() {
         </div>
       </section>
 
-      {/* --- CRM Contact Section --- */}
-      <section id="contact" className="py-20 md:py-32 bg-[#fcfcfc] relative overflow-hidden">
+      <section id="contact" className="py-16 md:py-32 bg-[#fcfcfc] relative overflow-hidden">
         <div className="absolute bottom-0 right-0 w-1/3 h-1/2 bg-brand-orange/5 blur-[120px] rounded-full" />
         <div className="container mx-auto px-6">
-          <div className="grid lg:grid-cols-2 gap-16 lg:gap-24 items-center">
+          <div className="grid lg:grid-cols-2 gap-12 md:gap-24 items-center">
             <div className="max-w-2xl">
-              <div className="flex items-center space-x-4 mb-8">
+              <div className="flex items-center space-x-4 mb-6 md:mb-8">
                  <div className="w-12 h-[2px] bg-brand-orange" />
-                 <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">VIP Private Consulting</span>
+                 <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[9px] md:text-[10px]">VIP Private Consulting</span>
               </div>
-              <h2 className="text-3xl md:text-6xl lg:text-7xl font-black mb-10 leading-[0.9] tracking-tighter uppercase font-sans">VAMOS <span className="text-brand-orange drop-shadow-[0_0_15px_rgba(255,92,0,0.2)] tracking-widest">CONSTRUIR</span> SEU LEGADO.</h2>
-              <p className="text-xl text-slate-500 mb-14 leading-relaxed font-medium">
-                Nossa assessoria vai além da transação. Oferecemos um serviço 360º para investidores e famílias que exigem o máximo de sofisticação e segurança.
+              <h2 className="text-2xl md:text-7xl font-black mb-6 md:mb-10 leading-[0.9] tracking-tighter uppercase">VAMOS <span className="text-brand-orange drop-shadow-[0_0_15px_rgba(255,92,0,0.2)]">CONSTRUIR</span> SEU LEGADO.</h2>
+              <p className="text-base md:text-xl text-slate-500 mb-8 md:mb-14 leading-relaxed font-medium">
+                Nossa assessoria vai além da transação. Oferecemos um serviço 360º para investidores de alto padrão.
               </p>
-              <div className="space-y-10">
+              <div className="space-y-6 md:space-y-10">
                 {[
-                  { title: "ESTRATÉGIA OFF-MARKET", desc: "Acesso privilegiado a ativos que nunca chegam ao mercado convencional.", icon: <Shield size={24} /> },
-                  { title: "INTELIGÊNCIA DE MERCADO", desc: "Análise profunda de tendências e ROIs em Sorocaba e região.", icon: <LayoutDashboard size={24} /> },
-                  { title: "GESTÃO DE PATRIMÔNIO", desc: "Curadoria focada em valorização e sucessão imobiliária.", icon: <Maximize size={24} /> }
+                  { title: "ESTRATÉGIA OFF-MARKET", desc: "Acesso privilegiado a ativos exclusivos.", icon: <Shield size={20} md:size={24} /> },
+                  { title: "INTELIGÊNCIA DE MERCADO", desc: "Análise profunda de investimentos.", icon: <LayoutDashboard size={20} md:size={24} /> },
+                  { title: "GESTÃO DE PATRIMÔNIO", desc: "Foco em valorização e sucessão.", icon: <Maximize size={20} md:size={24} /> }
                 ].map((item, i) => (
-                  <div key={i} className="flex items-start space-x-6 group">
-                    <div className="w-14 h-14 bg-black text-brand-orange rounded-2xl flex items-center justify-center flex-shrink-0 group-hover:bg-brand-orange group-hover:text-white transition-all shadow-xl">
+                  <div key={i} className="flex items-start space-x-4 md:space-x-6 group">
+                    <div className="w-10 h-10 md:w-14 md:h-14 bg-black text-brand-orange rounded-xl md:rounded-2xl flex items-center justify-center flex-shrink-0 group-hover:bg-brand-orange group-hover:text-white transition-all shadow-xl">
                       {item.icon}
                     </div>
                     <div>
-                      <h4 className="font-black text-xl tracking-tight mb-2 group-hover:text-brand-orange transition-colors uppercase">{item.title}</h4>
-                      <p className="text-slate-400 font-medium leading-relaxed">{item.desc}</p>
+                      <h4 className="font-black text-base md:text-xl tracking-tight mb-1 md:mb-2 group-hover:text-brand-orange transition-colors uppercase leading-none">{item.title}</h4>
+                      <p className="text-slate-400 text-sm md:text-base font-medium leading-relaxed">{item.desc}</p>
                     </div>
                   </div>
                 ))}
