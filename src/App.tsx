@@ -3379,7 +3379,7 @@ export default function App() {
             transition={{ duration: 1, ease: "easeOut" }}
           >
             {/* --- Hero Section --- */}
-            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-start pt-28 pb-20 md:pt-64 overflow-hidden">
+            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-center pt-32 pb-20 md:pt-40 overflow-hidden">
         <motion.div 
           initial={{ scale: 1.1 }}
           animate={{ scale: 1 }}
