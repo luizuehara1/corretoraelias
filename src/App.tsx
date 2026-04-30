@@ -3379,7 +3379,7 @@ export default function App() {
             transition={{ duration: 1, ease: "easeOut" }}
           >
             {/* --- Hero Section --- */}
-            <section className="relative h-auto md:h-screen min-h-[90vh] flex items-start md:items-center pt-48 pb-20 md:pt-20 overflow-hidden">
+            <section className="relative h-auto md:h-screen min-h-[85vh] flex items-start md:items-center pt-32 pb-16 md:pt-20 overflow-hidden">
         <motion.div 
           initial={{ scale: 1.1 }}
           animate={{ scale: 1 }}
@@ -3407,11 +3407,11 @@ export default function App() {
                 <div className="h-[1.5px] w-10 md:w-12 bg-brand-orange" />
                 <span className="text-brand-orange font-bold uppercase tracking-[0.3em] text-[10px] md:text-xs">Exclusividade em Sorocaba</span>
               </div>
-              <h1 className="text-4xl md:text-7xl lg:text-9xl text-white font-black leading-[1] md:leading-[0.85] mb-6 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+              <h1 className="text-3xl md:text-6xl lg:text-7xl text-white font-black leading-[1] md:leading-[0.85] mb-5 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
                 SUA PRÓXIMA <br className="hidden md:block" />
                 <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>CONQUISTA</span>
               </h1>
-              <p className="text-sm md:text-xl text-white/70 mb-8 md:mb-12 max-w-2xl leading-relaxed font-medium md:border-l border-white/20 md:pl-8">
+              <p className="text-xs md:text-lg text-white/70 mb-6 md:mb-10 max-w-2xl leading-relaxed font-medium md:border-l border-white/20 md:pl-8">
                 Curadoria especializada dos imóveis mais desejados da região. <br className="hidden md:block" />
                 Arquitetura, luxo e o endereço que você sempre sonhou.
               </p>
@@ -3441,16 +3441,16 @@ export default function App() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.8 }}
-              className="bg-black/90 backdrop-blur-3xl p-4 md:p-8 rounded-3xl md:rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-4 md:gap-6 border border-white/10"
+              className="bg-black/90 backdrop-blur-3xl p-3 md:p-6 rounded-2xl md:rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-3 md:gap-5 border border-white/10"
             >
-              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-6">
+              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-4">
                 <div className="flex-1 relative">
-                  <div className="flex items-center px-4 md:px-6 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-3 md:py-4 group focus-within:border-brand-orange transition-all shadow-inner">
-                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={18} md:size={22} />
+                  <div className="flex items-center px-4 md:px-5 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-2.5 md:py-3.5 group focus-within:border-brand-orange transition-all shadow-inner">
+                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={16} md:size={20} />
                     <input 
                       type="text" 
                       placeholder="Localização, bairro ou condomínio..." 
-                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-sm md:text-lg"
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-xs md:text-lg"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -3488,10 +3488,10 @@ export default function App() {
                   </AnimatePresence>
                 </div>
                 
-                <div className="md:w-64 bg-white/5 rounded-2xl border border-white/10 px-6 py-3.5 md:py-4 relative group focus-within:border-brand-orange transition-all shadow-inner">
+                <div className="md:w-64 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 px-5 py-3 md:py-3.5 relative group focus-within:border-brand-orange transition-all shadow-inner">
                   <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Categoria</span>
                   <select 
-                    className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-xs tracking-widest"
+                    className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-[10px] md:text-xs tracking-widest"
                     value={categoryFilter}
                     onChange={(e) => {
                       setCategoryFilter(e.target.value as any);
@@ -3505,22 +3505,22 @@ export default function App() {
                   </select>
                 </div>
 
-                <a href="#properties" className="btn-primary !px-10 !py-3.5 md:!py-4 shadow-orange-500/20 text-center whitespace-nowrap flex items-center justify-center gap-3 w-full md:w-auto">
+                <a href="#properties" className="btn-primary !px-10 !py-3 md:!py-3.5 shadow-orange-500/20 text-center whitespace-nowrap flex items-center justify-center gap-3 w-full md:w-auto">
                   <Search size={20} />
-                  <span>BUSCAR IMÓVEIS</span>
+                  <span className="text-sm md:text-base">BUSCAR IMÓVEIS</span>
                 </a>
               </div>
 
-              <div className="flex flex-col gap-6 pt-6 border-t border-white/5">
-                <div className="flex flex-col lg:flex-row items-center gap-6 lg:gap-10 w-full">
-                  <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
-                    <span className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em] whitespace-nowrap">Faixa de Investimento</span>
-                    <div className="flex items-center gap-3 w-full sm:w-auto">
-                      <div className="flex-1 sm:w-40 relative group">
+              <div className="flex flex-col gap-4 pt-4 border-t border-white/5">
+                <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-6 w-full">
+                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                    <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.3em] whitespace-nowrap">Faixa de Investimento</span>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <div className="flex-1 sm:w-36 relative group">
                         <input 
                           type="text" 
                           placeholder="Mínimo (ex: 500k)"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10 transition-all"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
                           value={minPriceDisplay}
                           onChange={(e) => setMinPriceDisplay(e.target.value)}
                           onBlur={() => {
@@ -3531,11 +3531,11 @@ export default function App() {
                         />
                       </div>
                       <div className="w-4 h-[1px] bg-white/20" />
-                      <div className="flex-1 sm:w-40 relative group">
+                      <div className="flex-1 sm:w-36 relative group">
                         <input 
                           type="text" 
                           placeholder="Máximo (ex: 2M)"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10 transition-all"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
                           value={maxPriceDisplay}
                           onChange={(e) => setMaxPriceDisplay(e.target.value)}
                           onBlur={() => {
@@ -3638,7 +3638,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.8, duration: 1 }}
-              className="mt-20 flex flex-wrap gap-16 justify-center md:justify-start"
+              className="mt-10 md:mt-16 flex flex-wrap gap-8 md:gap-16 justify-center md:justify-start"
             >
               {[
                 { val: 'R$ 1.2B+', lab: 'Volume de Negócios' },
