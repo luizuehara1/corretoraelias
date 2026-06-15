@@ -1,8 +1,9 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     // ---------------------------------------------------------
-    // Habilita helpers globais
+    // Helper functions
     // ---------------------------------------------------------
     function isSignedIn() {
       return request.auth != null;
@@ -16,104 +17,180 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'luiz.uehara1@gmail.com' ||
         request.auth.token.email == 'eliasborgess@creci.org.com.br' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/administradores/$(request.auth.uid))
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
     // ---------------------------------------------------------
-    // Catch-all deny
+    // Global Safety Net (Must be first)
     // ---------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
     }
 
     // ---------------------------------------------------------
-    // Admins Collection
+    // Admins and Administradores Collections
     // ---------------------------------------------------------
     match /admins/{adminId} {
       allow read: if isSignedIn();
-      allow write: if false; // Somente via console ou script master
+      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br'));
+    }
+
+    match /administradores/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br'));
     }
 
     // ---------------------------------------------------------
-    // Properties Collection
+    // Core Application Collections
     // ---------------------------------------------------------
-    function isValidProperty(data) {
-      return data.title is string && data.title.size() <= 200 &&
-             data.price is string && data.price.size() <= 100 &&
-             data.image is string && data.image.size() <= 1000;
-    }
-
-    match /properties/{propertyId} {
+    match /imoveis/{imovelId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidProperty(incoming()) && incoming().createdAt == request.time;
-      allow update: if isAdmin() && isValidProperty(incoming()) && incoming().updatedAt == request.time;
-      allow delete: if isAdmin();
+      allow write: if isAdmin();
     }
 
-    // ---------------------------------------------------------
-    // Property Submissions
-    // ---------------------------------------------------------
-    match /property_submissions/{submissionId} {
-      allow create: if isSignedIn() && isValidProperty(incoming()) && incoming().status == 'pending';
+    match /leads/{leadId} {
+      allow create: if true;
       allow read, update, delete: if isAdmin();
     }
 
-    // ---------------------------------------------------------
-    // Visits Collection
-    // ---------------------------------------------------------
-    function isValidVisit(data) {
-      return data.name is string && data.name.size() <= 100 &&
-             data.phone is string && data.phone.size() <= 30 &&
-             data.date is string && data.time is string;
+    match /property_submissions/{submissionId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
     }
 
     match /visits/{visitId} {
-      allow create: if true; // Aberto ao público para agendar
-      allow list: if isAdmin();
-      allow get: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow create: if true;
+      allow read: if true;
+      allow update, delete: if isAdmin();
     }
 
-    // ---------------------------------------------------------
-    // Blocked Slots
-    // ---------------------------------------------------------
     match /blocked_slots/{slotId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // ---------------------------------------------------------
-    // Leads Collection
-    // ---------------------------------------------------------
-    match /leads/{leadId} {
-      allow create: if true;
-      allow read: if isAdmin();
+    match /favorites/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      match /items/{itemId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /corretores/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /proprietarios/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /locacoes/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /financeiro/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /transacoesFinanceiras/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /agendamentos/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /visitas/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /solicitacoes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // ---------------------------------------------------------
-    // Favorites Collection
+    // Dynamic Dropdown Config Options & Settings Collections
     // ---------------------------------------------------------
-    match /favorites/{userId} {
-      allow get: if isOwner(userId);
-      allow create, update: if isOwner(userId) && incoming().lastUpdated == request.time;
-      
-      match /items/{propertyId} {
-        allow read, write: if isOwner(userId);
-      }
+    match /siteSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /tiposImovel/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /tiposNegocio/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /statusImovel/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /cidades/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /bairros/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicas/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /ambientes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicasEmpreendimento/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /lazer/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /instalacoes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /acabamentos/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /proximidades/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /faixasPreco/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicasApartamento/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

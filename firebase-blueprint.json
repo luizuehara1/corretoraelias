@@ -52,12 +52,56 @@
         "reason": { "type": "string" }
       },
       "required": ["date", "time"]
+    },
+    "corretor": {
+      "title": "Corretor",
+      "description": "Dados cadastrais do corretor de imóveis",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "creci": { "type": "string" },
+        "telefone": { "type": "string" },
+        "email": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "ativo": { "type": "boolean" }
+      },
+      "required": ["nome"]
+    },
+    "proprietario": {
+      "title": "Proprietário",
+      "description": "Dados civis e faturamento do proprietário",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "cpfCnpj": { "type": "string" },
+        "telefone": { "type": "string" },
+        "email": { "type": "string" },
+        "endereco": { "type": "string" },
+        "ativo": { "type": "boolean" }
+      },
+      "required": ["nome"]
+    },
+    "site_settings": {
+      "title": "Configurações do Site",
+      "description": "Identidade e contatos globais da imobiliária",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "phone": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "email": { "type": "string" },
+        "creci": { "type": "string" },
+        "address": { "type": "string" },
+        "instagram": { "type": "string" },
+        "facebook": { "type": "string" },
+        "linkedin": { "type": "string" }
+      }
     }
   },
   "firestore": {
-    "/properties/{propertyId}": {
+    "/imoveis/{imovelId}": {
       "schema": "property",
-      "description": "Catálogo de imóveis aprovados"
+      "description": "Catálogo de imóveis aprovados (imoveis)"
     },
     "/property_submissions/{submissionId}": {
       "schema": "property",
@@ -93,6 +137,74 @@
         }
       },
       "description": "Contatos captados pelo site"
+    },
+    "/tiposImovel/{id}": {
+      "schema": "object",
+      "description": "Opções de tipos de imóvel"
+    },
+    "/tiposNegocio/{id}": {
+      "schema": "object",
+      "description": "Opções de tipos de negócio"
+    },
+    "/statusImovel/{id}": {
+      "schema": "object",
+      "description": "Opções de status do imóvel"
+    },
+    "/cidades/{id}": {
+      "schema": "object",
+      "description": "Opções de cidades disponíveis"
+    },
+    "/bairros/{id}": {
+      "schema": "object",
+      "description": "Opções de bairros mapeados"
+    },
+    "/caracteristicas/{id}": {
+      "schema": "object",
+      "description": "Opções de características gerais"
+    },
+    "/ambientes/{id}": {
+      "schema": "object",
+      "description": "Opções de ambientes"
+    },
+    "/caracteristicasEmpreendimento/{id}": {
+      "schema": "object",
+      "description": "Opções de características do empreendimento"
+    },
+    "/lazer/{id}": {
+      "schema": "object",
+      "description": "Opções de itens de lazer"
+    },
+    "/instalacoes/{id}": {
+      "schema": "object",
+      "description": "Opções de instalações"
+    },
+    "/acabamentos/{id}": {
+      "schema": "object",
+      "description": "Opções de acabamentos"
+    },
+    "/proximidades/{id}": {
+      "schema": "object",
+      "description": "Opções de proximidades"
+    },
+    "/faixasPreco/{id}": {
+      "schema": "object",
+      "description": "Opções de faixas de preço"
+    },
+    "/caracteristicasApartamento/{id}": {
+      "schema": "object",
+      "description": "Opções de características de apartamento"
+    },
+    "/corretores/{id}": {
+      "schema": "corretor",
+      "description": "Equipe de corretores"
+    },
+    "/proprietarios/{id}": {
+      "schema": "proprietario",
+      "description": "Cadastro de proprietários"
+    },
+    "/siteSettings/{id}": {
+      "schema": "site_settings",
+      "description": "Configurações gerais do site"
     }
   }
 }

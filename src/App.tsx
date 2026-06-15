@@ -44,7 +44,13 @@ import {
   Camera,
   Upload,
   ImagePlus,
-  Download
+  Download,
+  Share2,
+  Wallet,
+  LogOut,
+  Globe,
+  FileText,
+  PlusCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -53,6 +59,7 @@ import 'leaflet/dist/leaflet.css';
 
 // --- Firebase ---
 import { 
+  db,
   saveLead, 
   loginWithGoogle, 
   logout, 
@@ -79,10 +86,15 @@ import {
   toggleFavorite,
   subscribeToFavorites,
   updateVisitStatus,
-  deleteVisit
+  deleteVisit,
+  subscribeToCollectionOptions,
+  publishPropertyToSite,
+  seedDefaultSettingsIfEmpty
 } from './lib/firebase';
+import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { exportReportToPDF, generateFullCatalogPDF } from './lib/pdfExport';
 import { sendVisitConfirmationNotification } from './services/notificationService';
+import AdminPortal from './components/OwnerPortal';
 
 // --- Config ---
 const BROKER_PHONE = '5515981504714';
@@ -116,8 +128,12 @@ interface Property {
   neighborhood: string;
   condominium?: string;
   condoValue?: string;
-  purpose: 'Venda' | 'Locação';
+  purpose: 'Venda' | 'Locação' | 'Venda e Locação' | string;
+  tipoNegocio?: string;
   acceptsFinancing?: boolean;
+  aceitaFinanciamento?: boolean;
+  aceitaPermuta?: boolean;
+  aceitaFGTS?: boolean;
   price: string;
   category: 'Residencial' | 'Comercial' | 'Rural';
   type: string;
@@ -135,8 +151,80 @@ interface Property {
   featured?: boolean;
   priceValue: number;
   coords: [number, number];
-  status: 'ativo' | 'inativo' | 'vendido';
+  status: 'ativo' | 'inativo' | 'vendido' | string;
   videoUrl?: string; // URL do vídeo (YouTube/Vimeo)
+  caracteristicas?: string[];
+  ambientes?: string[];
+  caracteristicasEmpreendimento?: string[];
+  lazer?: string[];
+  instalacoes?: string[];
+  acabamentos?: string[];
+  proximidades?: string[];
+  codigo?: string;
+  codigoImovel?: string;
+  publicado?: boolean;
+  publicadoNoSite?: boolean;
+  mostrarNosFiltros?: boolean;
+  mostrarValorNoSite?: boolean;
+  vendido?: boolean;
+  disponivelParaVisita?: boolean;
+  disponivelParaProposta?: boolean;
+  tituloAnuncio?: string;
+  subtituloAnuncio?: string;
+  descricaoCurta?: string;
+  descricaoDetalhada?: string;
+  diferenciaisAnuncio?: string;
+  textoWhatsapp?: string;
+  textoInstagram?: string;
+  tituloSEO?: string;
+  descricaoSEO?: string;
+  palavrasChaveSEO?: string;
+  
+  // Rental Fields
+  valorVenda?: number;
+  valorAluguel?: number;
+  valorTotalMensal?: number;
+  valorCondominio?: number;
+  valorIptuAnual?: number;
+  valorIptu?: number;
+  iptuMensal?: number;
+  taxaLixoAnual?: number;
+  taxaLixo?: number;
+  taxaLixoMensal?: number;
+  taxaGas?: number;
+  taxaAgua?: number;
+  taxaLuz?: number;
+  seguroIncendio?: number;
+  taxasAdicionais?: number;
+  garantiaLocaticia?: string;
+  tempoMinimoContrato?: string;
+  permitePet?: string;
+  mobiliadoStatus?: string;
+  observacoesLocacao?: string;
+  alugado?: boolean;
+  statusLocacao?: string;
+  statusVenda?: string;
+  gestaoLocacao?: {
+    statusLocacao?: string;
+    alugado?: boolean;
+    contratoAtivo?: boolean;
+    locacaoEmDia?: boolean;
+    locatarioNome?: string;
+    locatarioCpfCnpj?: string;
+    locatarioRgIe?: string;
+    locatarioWhatsapp?: string;
+    locatarioEmail?: string;
+    locatarioEndereco?: string;
+    dataInicioLocacao?: string;
+    dataFimLocacao?: string;
+    valorAluguelContratado?: number;
+    valorCaucao?: number;
+    garantiaLocaticia?: string;
+    diaVencimentoAluguel?: string;
+    observacoesLocacao?: string;
+    permitirVisitaMesmoAlugado?: boolean;
+    manterDisponivelParaVenda?: boolean;
+  };
 }
 
 interface Testimonial {
@@ -731,23 +819,192 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
               
               <div className="space-y-4 md:space-y-6">
                 <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Valores e Condições</h4>
-                <div className="flex flex-col sm:flex-row sm:items-end gap-1 sm:gap-4">
-                  <span className="text-3xl md:text-5xl font-black tracking-tighter">{property.price}</span>
-                  <span className="text-white/40 text-[10px] md:text-sm mb-1 sm:mb-2 font-bold italic">/ Investimento</span>
-                </div>
                 
-                {property.condominium && (
+                {(() => {
+                  const purposeVal = property.purpose || property.tipoNegocio || 'Venda';
+                  
+                  const renderVendaSection = () => {
+                    if (purposeVal !== 'Venda' && purposeVal !== 'Venda e Locação') return null;
+                    return (
+                      <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-4">
+                        <div className="text-[10px] font-black uppercase text-brand-orange tracking-widest">Informações de Venda</div>
+                        <div className="flex flex-col sm:flex-row sm:items-end gap-1 sm:gap-4">
+                          <span className="text-3xl md:text-5xl font-black tracking-tighter">
+                            R$ {Number(property.valorVenda || property.priceValue || 0).toLocaleString('pt-BR')}
+                          </span>
+                          <span className="text-white/40 text-[10px] md:text-sm mb-1 sm:mb-2 font-bold italic">Valor de Venda</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-2.5 h-2.5 rounded-full ${property.acceptsFinancing || property.aceitaFinanciamento ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,44,44,0.5)]'}`} />
+                            <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest opacity-80">
+                              {property.acceptsFinancing || property.aceitaFinanciamento ? 'Aceita Financiamento' : 'Não Aceita Financiamento'}
+                            </span>
+                          </div>
+                          
+                          {property.aceitaPermuta && (
+                            <div className="flex items-center gap-3">
+                              <div className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                              <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest opacity-80">Aceita Permuta em Sorocaba</span>
+                            </div>
+                          )}
+
+                          {property.aceitaFGTS && (
+                            <div className="flex items-center gap-3">
+                              <div className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
+                              <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest opacity-80">Aceita FGTS</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  const renderLocacaoSection = () => {
+                    if (purposeVal !== 'Locação' && purposeVal !== 'Venda e Locação') return null;
+                    const iptuAnual = Number(property.valorIptuAnual || property.valorIptu || 0);
+                    const iptuMensalVal = property.iptuMensal !== undefined ? Number(property.iptuMensal) : iptuAnual / 12;
+                    const taxaLixoAnual = Number(property.taxaLixoAnual || property.taxaLixo || 0);
+                    const taxaLixoMensalVal = property.taxaLixoMensal !== undefined ? Number(property.taxaLixoMensal) : taxaLixoAnual / 12;
+                    
+                    return (
+                      <div className="bg-white/5 p-6 rounded-2xl border border-white/5 space-y-4">
+                        <div className="text-[10px] font-black uppercase text-brand-orange tracking-widest">Informações de Locação</div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <span className="text-white/30 text-[9px] font-black uppercase tracking-[0.22em] block">Taxa Aluguel</span>
+                            <span className="text-2xl md:text-3xl font-black text-white">
+                              R$ {Number(property.valorAluguel || property.priceValue || 0).toLocaleString('pt-BR')}/mês
+                            </span>
+                          </div>
+                          {Number(property.valorTotalMensal || 0) > 0 && (
+                            <div className="space-y-1">
+                              <span className="text-brand-orange text-[9px] font-black uppercase tracking-[0.22em] block">Pacote Total Mensal</span>
+                              <span className="text-2xl md:text-3xl font-black text-brand-orange">
+                                R$ {Number(property.valorTotalMensal).toLocaleString('pt-BR')}/mês
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs opacity-80 border-t border-white/10 pt-3">
+                          {Number(property.valorCondominio || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Condomínio</span>
+                              <span className="font-bold">R$ {Number(property.valorCondominio).toLocaleString('pt-BR')}/mês</span>
+                            </div>
+                          )}
+                          {iptuMensalVal > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">IPTU Mensal</span>
+                              <span className="font-bold">R$ {iptuMensalVal.toFixed(2)}/mês</span>
+                            </div>
+                          )}
+                          {taxaLixoMensalVal > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Taxa Lixo</span>
+                              <span className="font-bold">R$ {taxaLixoMensalVal.toFixed(2)}/mês</span>
+                            </div>
+                          )}
+                          {Number(property.taxaGas || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Taxa de Gás</span>
+                              <span className="font-bold">R$ {Number(property.taxaGas).toLocaleString('pt-BR')}/mês</span>
+                            </div>
+                          )}
+                          {Number(property.taxaAgua || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Taxa de Água</span>
+                              <span className="font-bold">R$ {Number(property.taxaAgua).toLocaleString('pt-BR')}/mês</span>
+                            </div>
+                          )}
+                          {Number(property.taxaLuz || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Taxa de Luz</span>
+                              <span className="font-bold">R$ {Number(property.taxaLuz).toLocaleString('pt-BR')}/mês</span>
+                            </div>
+                          )}
+                          {Number(property.seguroIncendio || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Seguro Incêndio</span>
+                              <span className="font-bold">R$ {Number(property.seguroIncendio).toLocaleString('pt-BR')}</span>
+                            </div>
+                          )}
+                          {Number(property.taxasAdicionais || 0) > 0 && (
+                            <div className="flex flex-col">
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Taxas Extras</span>
+                              <span className="font-bold">R$ {Number(property.taxasAdicionais).toLocaleString('pt-BR')}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 text-xs opacity-80 border-t border-white/10 pt-3">
+                          {property.garantiaLocaticia && (
+                            <div>
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Garantia Exigida</span>
+                              <p className="font-bold">{property.garantiaLocaticia}</p>
+                            </div>
+                          )}
+                          {property.tempoMinimoContrato && (
+                            <div>
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Período Mínimo</span>
+                              <p className="font-bold">{property.tempoMinimoContrato}</p>
+                            </div>
+                          )}
+                          {property.permitePet && (
+                            <div>
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Restrição Pets</span>
+                              <p className="font-bold">{property.permitePet}</p>
+                            </div>
+                          )}
+                          {property.mobiliadoStatus && (
+                            <div>
+                              <span className="opacity-50 text-[9px] uppercase font-black tracking-wider">Mobiliário</span>
+                              <p className="font-bold">{property.mobiliadoStatus}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {property.observacoesLocacao && (
+                          <div className="bg-white/5 p-3 rounded-xl border border-white/5 text-xs opacity-90 font-mono whitespace-pre-wrap leading-relaxed mt-2">
+                            <span className="text-[9px] uppercase opacity-40 font-black block tracking-widest mb-1">Notas da Locação:</span>
+                            {property.observacoesLocacao}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div className="space-y-4">
+                      {renderVendaSection()}
+                      {renderLocacaoSection()}
+                    </div>
+                  );
+                })()}
+
+                {property.condominium && !property.valorTotalMensal && (
                    <div className="flex items-center text-white/60 font-bold italic text-xs md:text-sm">
                      <span className="mr-2 opacity-50">• Condomínio:</span>
                      {property.condominium} {property.condoValue ? `(${property.condoValue})` : ''}
                    </div>
                 )}
-                
-                <div className="flex items-center gap-3">
-                  <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full ${property.acceptsFinancing ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,44,44,0.5)]'}`} />
-                  <span className="text-[10px] md:text-sm font-bold uppercase tracking-widest opacity-70">
-                    {property.acceptsFinancing ? 'Aceita Financiamento' : 'Não Aceita Financiamento'}
-                  </span>
+
+                <div className="pt-4 border-t border-white/10">
+                  <button
+                    onClick={() => {
+                      const code = property.codigoImovel || property.codigo || property.id;
+                      const url = `${window.location.origin}/imovel/${code}`;
+                      navigator.clipboard.writeText(url);
+                      alert(`Link público copiado:\n${url}`);
+                    }}
+                    className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-3 px-4 rounded-xl text-xs md:text-sm transition-all flex items-center justify-center gap-3 border border-white/5 uppercase tracking-widest"
+                  >
+                    <Share2 size={16} />
+                    <span>Copiar Link de Compartilhamento</span>
+                  </button>
                 </div>
               </div>
 
@@ -1026,7 +1283,7 @@ function MonthlyReportModal({
   );
 }
 
-function AdminPortal({ 
+function InlineAdminPortal({ 
   properties, 
   scheduledVisits = [],
   blockedSlots = [],
@@ -1038,7 +1295,19 @@ function AdminPortal({
   onUpdateVisitStatus,
   onDeleteVisit,
   onClose,
-  isAuthorized
+  isAuthorized,
+  optTiposImovel = [],
+  optTiposNegocio = [],
+  optStatusImovel = [],
+  optCidades = [],
+  optBairros = [],
+  optCaracteristicas = [],
+  optAmbientes = [],
+  optCaracteristicasEmpreendimento = [],
+  optLazer = [],
+  optInstalacoes = [],
+  optAcabamentos = [],
+  optProximidades = []
  }: { 
   properties: Property[], 
   scheduledVisits?: any[],
@@ -1051,13 +1320,40 @@ function AdminPortal({
   onUpdateVisitStatus?: (id: string, status: 'pending' | 'confirmed' | 'cancelled') => Promise<void>,
   onDeleteVisit?: (id: string) => Promise<void>,
   onClose: () => void,
-  isAuthorized: boolean
+  isAuthorized: boolean,
+  optTiposImovel?: any[],
+  optTiposNegocio?: any[],
+  optStatusImovel?: any[],
+  optCidades?: any[],
+  optBairros?: any[],
+  optCaracteristicas?: any[],
+  optAmbientes?: any[],
+  optCaracteristicasEmpreendimento?: any[],
+  optLazer?: any[],
+  optInstalacoes?: any[],
+  optAcabamentos?: any[],
+  optProximidades?: any[]
  }) {
+  const currentUser = auth.currentUser;
   const [showAddForm, setShowAddForm] = useState(!isAuthorized);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | number | null>(null);
   const [formStep, setFormStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'submissions' | 'visits'>('inventory');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'submissions' | 'visits' | 'financial' | 'profile'>(isAuthorized ? 'dashboard' : 'inventory');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [profile, setProfile] = useState({
+    name: currentUser?.displayName || 'Luiz Sepúlveda',
+    email: currentUser?.email || 'luiz.uehara1@gmail.com',
+    phone: '(15) 99123-4567',
+    whatsapp: '(15) 99123-4567',
+    cpfCnpj: '123.456.789-00',
+    address: 'Av. Gisele Constantino, 1850',
+    city: 'Sorocaba',
+    state: 'SP'
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [financialList, setFinancialList] = useState<any[]>([]);
+  const [financialLoading, setFinancialLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [isBlockingSlot, setIsBlockingSlot] = useState(false);
@@ -1068,7 +1364,50 @@ function AdminPortal({
   const [viewingProperty, setViewingProperty] = useState<Property | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>(['']);
   const [blockFormData, setBlockFormData] = useState({ date: '', time: '', reason: '' });
+
+  const renderChecklist = (title: string, options: any[], keyName: string) => {
+    const isSelected = (val: string) => {
+      const arr = (newProperty as any)[keyName];
+      return Array.isArray(arr) && arr.includes(val);
+    };
+
+    const toggleSelection = (val: string) => {
+      const current = (newProperty as any)[keyName] || [];
+      const updated = current.includes(val) 
+        ? current.filter((x: string) => x !== val) 
+        : [...current, val];
+      setNewProperty({ ...newProperty, [keyName]: updated });
+    };
+
+    return (
+      <div className="space-y-3 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+        <label className="text-xs uppercase tracking-widest font-black text-slate-500 border-l-4 border-brand-orange pl-3">{title}</label>
+        {options.length === 0 ? (
+          <p className="text-xs text-slate-400 italic font-medium">Nenhuma opção cadastrada ainda.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto mt-2 p-1">
+            {options.map((opt) => {
+              const name = opt.nome || opt.id;
+              const checked = isSelected(name);
+              return (
+                <label key={opt.id} className="flex items-center space-x-3 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={checked} 
+                    onChange={() => toggleSelection(name)}
+                    className="rounded border-slate-200 text-brand-orange focus:ring-brand-orange w-4 h-4 transition-all"
+                  />
+                  <span>{name}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
   const [priceError, setPriceError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string | number, title: string } | null>(null);
 
   const TIME_SLOTS = [
     '08:00', '09:00', '10:00', '11:00', '12:00', 
@@ -1092,6 +1431,57 @@ function AdminPortal({
       fetchSubmissions();
     }
   }, [isAuthorized, activeTab]);
+
+  useEffect(() => {
+    if (currentUser) {
+      const fetchProfile = async () => {
+        try {
+          const docRef = doc(db, "proprietarios", currentUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            setProfile(prev => ({ ...prev, ...docSnap.data() }));
+          } else {
+            const initialProfile = {
+              name: currentUser.displayName || 'Luiz Sepúlveda',
+              email: currentUser.email || 'luiz.uehara1@gmail.com',
+              phone: '(15) 99123-4567',
+              whatsapp: '(15) 99123-4567',
+              cpfCnpj: '123.456.789-00',
+              address: 'Av. Gisele Constantino, 1850',
+              city: 'Sorocaba',
+              state: 'SP'
+            };
+            await setDoc(docRef, initialProfile);
+            setProfile(initialProfile);
+          }
+        } catch (err) {
+          console.error("Error loading profile:", err);
+        }
+      };
+      fetchProfile();
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setFinancialLoading(true);
+    const q = query(
+      collection(db, "financeiro"),
+      where("ownerId", "==", currentUser.uid)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs
+        .filter(doc => doc.id !== "init")
+        .filter(doc => doc.data()?.init !== true)
+        .map(doc => ({ id: doc.id, ...doc.data() }));
+      setFinancialList(docs);
+      setFinancialLoading(false);
+    }, (err) => {
+      console.error("Firestore financial permission error:", err);
+      setFinancialLoading(false);
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
 
   const fetchSubmissions = async () => {
     try {
@@ -1126,7 +1516,7 @@ function AdminPortal({
   };
 
   const [showSuccess, setShowSuccess] = useState(false);
-  const [newProperty, setNewProperty] = useState<Omit<Property, 'id'> & { id?: number }>({
+  const [newProperty, setNewProperty] = useState<Omit<Property, 'id'> & { id?: string | number }>({
     title: '',
     description: '',
     location: '',
@@ -1152,8 +1542,15 @@ function AdminPortal({
     image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop',
     featured: false,
     coords: [-23.5018, -47.4581],
-    status: 'ativo',
-    videoUrl: ''
+    status: 'Disponível',
+    videoUrl: '',
+    caracteristicas: [],
+    ambientes: [],
+    caracteristicasEmpreendimento: [],
+    lazer: [],
+    instalacoes: [],
+    acabamentos: [],
+    proximidades: [],
   });
 
   const handleSubmit = async (e: FormEvent) => {
@@ -1168,7 +1565,7 @@ function AdminPortal({
       setPriceError(null);
     }
     
-    if (formStep < 4) {
+    if (formStep < 5) {
       setFormStep(formStep + 1);
       return;
     }
@@ -1180,7 +1577,10 @@ function AdminPortal({
       const propertyData = {
         ...newProperty,
         image: validUrls[0] || newProperty.image,
-        additionalImages: validUrls.slice(1)
+        additionalImages: validUrls.slice(1),
+        ownerId: currentUser?.uid || '',
+        emailProprietario: currentUser?.email || '',
+        proprietarioId: currentUser?.uid || ''
       };
 
       // WhatsApp Notification Trigger
@@ -1251,15 +1651,32 @@ function AdminPortal({
       areaUseful: '',
       image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop',
       coords: [-23.5018, -47.4581],
-      status: 'ativo',
+      status: 'Disponível',
       featured: false,
-      videoUrl: ''
+      videoUrl: '',
+      caracteristicas: [],
+      ambientes: [],
+      caracteristicasEmpreendimento: [],
+      lazer: [],
+      instalacoes: [],
+      acabamentos: [],
+      proximidades: [],
     });
   };
 
   const handleEdit = (property: Property) => {
     setEditingId(property.id);
-    setNewProperty(property);
+    setNewProperty({
+      ...property,
+      caracteristicas: property.caracteristicas || [],
+      ambientes: property.ambientes || [],
+      caracteristicasEmpreendimento: property.caracteristicasEmpreendimento || [],
+      lazer: property.lazer || [],
+      instalacoes: property.instalacoes || [],
+      acabamentos: property.acabamentos || [],
+      proximidades: property.proximidades || [],
+      status: property.status === 'ativo' ? 'Disponível' : (property.status === 'inativo' ? 'Inativo' : property.status),
+    });
     setPriceError(null);
     setImageUrls([property.image, ...(property.additionalImages || [])]);
     setShowAddForm(true);
@@ -1542,13 +1959,13 @@ function AdminPortal({
                       <div className="w-12 h-1 bg-brand-orange mt-2" />
                     </div>
                     <div className="flex items-center space-x-2">
-                      {[1, 2, 3, 4].map(s => (
+                      {[1, 2, 3, 4, 5].map(s => (
                         <div 
                           key={s} 
                           className={`h-2 rounded-full transition-all duration-500 ${formStep >= s ? 'w-8 bg-brand-orange' : 'w-2 bg-slate-200'}`} 
                         />
                       ))}
-                      <span className="ml-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Etapa {formStep} de 4</span>
+                      <span className="ml-4 text-xs font-bold text-slate-400 uppercase tracking-widest">Etapa {formStep} de 5</span>
                     </div>
                   </div>
 
@@ -1609,13 +2026,23 @@ function AdminPortal({
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Status do Imóvel</label>
                         <select 
-                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 appearance-none outline-none focus:border-brand-orange cursor-pointer font-bold"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange cursor-pointer font-bold"
                           value={newProperty.status}
-                          onChange={e => setNewProperty({...newProperty, status: e.target.value as any})}
+                          onChange={e => setNewProperty({...newProperty, status: e.target.value})}
                         >
-                          <option value="ativo">Ativo (Publicado)</option>
-                          <option value="inativo">Inativo (Rascunho)</option>
-                          <option value="vendido">Vendido</option>
+                          {optStatusImovel.length === 0 ? (
+                            <>
+                              <option value="">Nenhuma opção cadastrada ainda.</option>
+                              <option value="Disponível">Disponível</option>
+                              <option value="Inativo">Inativo</option>
+                              <option value="Vendido">Vendido</option>
+                            </>
+                          ) : (
+                            optStatusImovel.map(opt => {
+                              const name = opt.nome || opt.id;
+                              return <option key={opt.id} value={name}>{name}</option>;
+                            })
+                          )}
                         </select>
                       </div>
                     </div>
@@ -1697,14 +2124,24 @@ function AdminPortal({
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Tipo de Imóvel</label>
-                        <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 appearance-none outline-none focus:border-brand-orange cursor-pointer"
+                        <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange cursor-pointer font-bold"
                           value={newProperty.propertyType} onChange={e => setNewProperty({...newProperty, propertyType: e.target.value})}>
-                          <option value="Casa">Casa</option>
-                          <option value="Apartamento">Apartamento</option>
-                          <option value="Comercial">Comercial</option>
-                          <option value="Chácara/Sítio">Chácara/Sítio</option>
-                          <option value="Terreno">Terreno</option>
-                          <option value="Outros">Outros</option>
+                          {optTiposImovel.length === 0 ? (
+                            <>
+                              <option value="">Nenhuma opção cadastrada ainda.</option>
+                              <option value="Casa">Casa</option>
+                              <option value="Apartamento">Apartamento</option>
+                              <option value="Comercial">Comercial</option>
+                              <option value="Chácara/Sítio">Chácara/Sítio</option>
+                              <option value="Terreno">Terreno</option>
+                              <option value="Outros">Outros</option>
+                            </>
+                          ) : (
+                            optTiposImovel.map(opt => {
+                              const name = opt.nome || opt.id;
+                              return <option key={opt.id} value={name}>{name}</option>;
+                            })
+                          )}
                         </select>
                       </div>
                     </div>
@@ -1725,13 +2162,41 @@ function AdminPortal({
                     <div className="grid md:grid-cols-3 gap-8">
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Cidade</label>
-                        <input required type="text" placeholder="Ex: Sorocaba" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange"
-                          value={newProperty.city} onChange={e => setNewProperty({...newProperty, city: e.target.value})} />
+                        <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange cursor-pointer font-bold"
+                          value={newProperty.city} onChange={e => setNewProperty({...newProperty, city: e.target.value})}>
+                          {optCidades.length === 0 ? (
+                            <>
+                              <option value="">Nenhuma opção cadastrada ainda.</option>
+                              <option value="Sorocaba">Sorocaba</option>
+                              <option value="Votorantim">Votorantim</option>
+                            </>
+                          ) : (
+                            optCidades.map(opt => {
+                              const name = opt.nome || opt.id;
+                              return <option key={opt.id} value={name}>{name}</option>;
+                            })
+                          )}
+                        </select>
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Bairro</label>
-                        <input required type="text" placeholder="Ex: Campolim" className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange"
-                          value={newProperty.neighborhood} onChange={e => setNewProperty({...newProperty, neighborhood: e.target.value})} />
+                        <select className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 outline-none focus:border-brand-orange cursor-pointer font-bold"
+                          value={newProperty.neighborhood} onChange={e => setNewProperty({...newProperty, neighborhood: e.target.value})}>
+                          {optBairros.length === 0 ? (
+                            <>
+                              <option value="">Nenhuma opção cadastrada ainda.</option>
+                              <option value="Campolim">Campolim</option>
+                              <option value="Ibiti do Paço">Ibiti do Paço</option>
+                              <option value="Granja Olga">Granja Olga</option>
+                              <option value="Manoel de Camargo">Manoel de Camargo</option>
+                            </>
+                          ) : (
+                            optBairros.map(opt => {
+                              const name = opt.nome || opt.id;
+                              return <option key={opt.id} value={name}>{name}</option>;
+                            })
+                          )}
+                        </select>
                       </div>
                       <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest font-bold text-slate-400 ml-2">Condomínio (Opcional)</label>
@@ -1743,6 +2208,27 @@ function AdminPortal({
                 )}
 
                 {formStep === 4 && (
+                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
+                    <h4 className="text-sm font-bold text-slate-900 uppercase tracking-[0.2em] mb-4 border-l-4 border-brand-orange pl-4">Diferenciais e Acabamentos</h4>
+                    <div className="grid md:grid-cols-2 gap-8">
+                      {renderChecklist("Características", optCaracteristicas || [], "caracteristicas")}
+                      {renderChecklist("Ambientes", optAmbientes || [], "ambientes")}
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-8">
+                      {renderChecklist("Características do Empreendimento", optCaracteristicasEmpreendimento || [], "caracteristicasEmpreendimento")}
+                      {renderChecklist("Lazer", optLazer || [], "lazer")}
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-8">
+                      {renderChecklist("Instalações", optInstalacoes || [], "instalacoes")}
+                      {renderChecklist("Acabamentos", optAcabamentos || [], "acabamentos")}
+                    </div>
+                    <div>
+                      {renderChecklist("Proximidades", optProximidades || [], "proximidades")}
+                    </div>
+                  </motion.div>
+                )}
+
+                {formStep === 5 && (
                   <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
                     <h4 className="text-sm font-bold text-slate-900 uppercase tracking-[0.2em] mb-4 border-l-4 border-brand-orange pl-4">Fotos via URL</h4>
                     <p className="text-slate-500 text-sm">Insira os links das fotos hospedadas. O primeiro será a imagem principal.</p>
@@ -1826,8 +2312,8 @@ function AdminPortal({
                         </>
                       ) : (
                         <>
-                          <span>{formStep < 4 ? 'Próximo Passo' : (editingId !== null ? 'Salvar Alterações' : (isAuthorized ? 'Publicar no Site' : 'Finalizar e Enviar'))}</span>
-                          {formStep < 4 ? <ArrowRight size={18} /> : <Send size={18} />}
+                          <span>{formStep < 5 ? 'Próximo Passo' : (editingId !== null ? 'Salvar Alterações' : (isAuthorized ? 'Publicar no Site' : 'Finalizar e Enviar'))}</span>
+                          {formStep < 5 ? <ArrowRight size={18} /> : <Send size={18} />}
                         </>
                       )}
                     </button>
@@ -1907,11 +2393,7 @@ function AdminPortal({
                             <Settings size={16} md:size={18} />
                           </button>
                           <button 
-                            onClick={() => {
-                              if (confirm("Deseja realmente excluir este imóvel?")) {
-                                onDeleteProperty(p.id);
-                              }
-                            }}
+                            onClick={() => setConfirmDelete({ id: p.id, title: p.title })}
                             className="text-red-400/50 hover:text-red-400 hover:bg-red-400/10 p-2 md:p-3 rounded-lg md:rounded-xl transition-all"
                             title="Excluir"
                           >
@@ -2140,6 +2622,50 @@ function AdminPortal({
           </div>
         </div>
       </div>
+
+      {/* --- Confirmation Modal --- */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-slate-900 border border-white/10 p-6 md:p-8 rounded-3xl max-w-sm w-full text-center"
+            >
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="text-red-500" size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2 uppercase tracking-tight">Confirmar Exclusão?</h3>
+              <p className="text-slate-400 text-sm mb-8">
+                Você está prestes a remover <span className="text-white font-black">"{confirmDelete.title}"</span>. Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => {
+                    onDeleteProperty(confirmDelete.id);
+                    setConfirmDelete(null);
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-all"
+                >
+                  Confirmar Exclusão
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest py-4 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -2177,11 +2703,16 @@ function PropertyCard({
         />
         <div className="absolute top-4 md:top-6 left-4 md:left-6 z-20 flex flex-col gap-2">
           <span className="bg-black/80 backdrop-blur-md text-white px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest border border-white/10 w-fit">
-            {property.purpose === 'Locação' ? 'Locação' : 'Venda'}
+            {property.purpose || property.tipoNegocio || 'Venda'}
           </span>
           <span className="bg-white/90 backdrop-blur-md text-brand-dark px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest border border-white/10 w-fit">
             {property.propertyType || property.type}
           </span>
+          {(property.alugado || property.statusLocacao === 'Alugado' || property.gestaoLocacao?.alugado) && (
+            <span className="bg-sky-600/90 backdrop-blur-md text-white px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest border border-white/10 w-fit">
+              Alugado
+            </span>
+          )}
         </div>
 
         {/* Favorite Button Overlay */}
@@ -2212,9 +2743,53 @@ function PropertyCard({
         </div>
 
         <div className="flex items-center gap-3 mb-6">
-          <p className="text-xl md:text-3xl font-black text-brand-orange tracking-tighter uppercase">
-            {property.price}
-          </p>
+          <div className="w-full">
+            {(() => {
+              const purposeVal = property.purpose || property.tipoNegocio || 'Venda';
+              if (purposeVal === 'Venda') {
+                return (
+                  <span className="text-xl md:text-3xl font-black text-brand-orange tracking-tighter uppercase">
+                    R$ {Number(property.valorVenda || property.priceValue || 0).toLocaleString('pt-BR')}
+                  </span>
+                );
+              } else if (purposeVal === 'Locação') {
+                return (
+                  <div className="flex flex-col">
+                    <span className="text-xl md:text-3xl font-black text-brand-orange tracking-tighter uppercase">
+                      R$ {Number(property.valorAluguel || property.priceValue || 0).toLocaleString('pt-BR')}/mês
+                    </span>
+                    {Number(property.valorTotalMensal || 0) > 0 && (
+                      <span className="text-[10px] font-black uppercase text-slate-500 font-mono mt-0.5 block">
+                        Pacote Aluguel: R$ {Number(property.valorTotalMensal).toLocaleString('pt-BR')}/mês
+                      </span>
+                    )}
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-black uppercase text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-mono">Venda</span>
+                      <span className="text-md md:text-xl font-black text-brand-orange tracking-tighter uppercase">
+                        R$ {Number(property.valorVenda || 0).toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-black uppercase text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-mono">Aluguel</span>
+                      <span className="text-md md:text-xl font-black text-brand-orange tracking-tighter uppercase">
+                        R$ {Number(property.valorAluguel || 0).toLocaleString('pt-BR')}/mês
+                      </span>
+                    </div>
+                    {Number(property.valorTotalMensal || 0) > 0 && (
+                      <span className="text-[9px] font-black uppercase text-stone-500 font-mono mt-1 block">
+                        Pacote Locação: R$ {Number(property.valorTotalMensal).toLocaleString('pt-BR')}/mês
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+            })()}
+          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-2 py-4 md:py-6 border-y border-slate-50">
@@ -2692,6 +3267,94 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [confirmingVisitId, setConfirmingVisitId] = useState<string | null>(null);
 
+  // Dynamic dynamic collection states for selects and checklists
+  const [optTiposImovel, setOptTiposImovel] = useState<any[]>([]);
+  const [optTiposNegocio, setOptTiposNegocio] = useState<any[]>([]);
+  const [optStatusImovel, setOptStatusImovel] = useState<any[]>([]);
+  const [optCidades, setOptCidades] = useState<any[]>([]);
+  const [optBairros, setOptBairros] = useState<any[]>([]);
+  const [optCaracteristicas, setOptCaracteristicas] = useState<any[]>([]);
+  const [optAmbientes, setOptAmbientes] = useState<any[]>([]);
+  const [optCaracteristicasEmpreendimento, setOptCaracteristicasEmpreendimento] = useState<any[]>([]);
+  const [optLazer, setOptLazer] = useState<any[]>([]);
+  const [optInstalacoes, setOptInstalacoes] = useState<any[]>([]);
+  const [optAcabamentos, setOptAcabamentos] = useState<any[]>([]);
+  const [optProximidades, setOptProximidades] = useState<any[]>([]);
+
+  // Site settings dynamic states with seeded fallbacks
+  const [siteHome, setSiteHome] = useState<any>({
+    homeTitle: "RB Sorocaba - Negócios Imobiliários de Alto Padrão",
+    homeSubtitle: "Seu novo estilo de vida começa aqui. Encontre as melhores casas e apartamentos em Sorocaba.",
+    homeBadge: "ALTO PADRÃO",
+    homePrimaryButtonText: "Ver Catálogo",
+    homePrimaryButtonLink: "#properties",
+    homeSecondaryButtonText: "Falar no WhatsApp",
+    homeSecondaryButtonLink: "https://wa.me/5515991143213",
+    homeBackgroundImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1920&q=80",
+    homeHeroEffectEnabled: true,
+    homeHighlightText: "A imobiliária de confiança da sua família",
+    homeCommerceCall: "Atendimento exclusive e personalizado de ponta a ponta"
+  });
+
+  const [siteSections, setSiteSections] = useState<any>({
+    featuredTitle: "Imóveis em Destaque",
+    featuredSubtitle: "Confira nossa seleção exclusiva de propriedades de alto padrão em Sorocaba",
+    aboutTitle: "Sobre a RB Sorocaba",
+    aboutText: "Com anos de experiência no mercado imobiliário de Sorocaba, nos especializamos na curadoria de imóveis de médio e alto padrão, oferecendo segurança, sofisticação e atendimento ultra-personalizado.",
+    aboutImageUrl: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=800&q=80",
+    brokersTitle: "Nossos Corretores",
+    brokersSubtitle: "Profissionais altamente capacitados prontos para apresentar o seu novo lar",
+    contactTitle: "Fale Conosco",
+    contactSupportText: "Tem alguma dúvida ou deseja agendar uma visita especial? Deixe sua mensagem.",
+    ctaTitle: "Pronto para Conquistar o Seu Espaço?",
+    ctaText: "Converse com um de nossos assessores e tenha acesso a oportunidades exclusivas antes mesmo de irem ao mercado.",
+    ctaButtonText: "Enviar Mensagem via WhatsApp",
+    ctaButtonLink: "https://wa.me/5515991143213"
+  });
+
+  const [siteCompany, setSiteCompany] = useState<any>({
+    nomeFantasia: "RB Sorocaba Negócios Imobiliários",
+    razaoSocial: "RB Sorocaba Negócios Imobiliários Ltda",
+    cnpj: "00.000.000/0001-00",
+    creciPj: "CRECI 123456-J",
+    creciResponsavel: "CRECI 278765-F",
+    telefone: "(15) 99114-3213",
+    whatsapp: "+55 (15) 99114-3213",
+    email: "atendimento@rbsorocaba.com.br",
+    site: "www.rbsorocaba.com.br",
+    endereco: "Av. Campolim",
+    numero: "1200",
+    complemento: "Sala 45",
+    bairro: "Campolim",
+    cidade: "Sorocaba",
+    estado: "SP",
+    cep: "18047-620",
+    responsavelLegal: "Elias Borges",
+    cpfResponsavel: "000.000.000-00",
+    cargoResponsavel: "Diretor Comercial",
+    logoCabecalhoUrl: "",
+    marcaDaguaUrl: "",
+    logoRodapeUrl: "",
+    faviconUrl: "",
+    textoRodapeContratos: "Este documento é confidencial e exclusivo da proposta de intermediação imobiliária.",
+    fraseInstitucional: "Ética, sofisticação e transparência na realização de seus sonhos."
+  });
+
+  const [siteAppearance, setSiteAppearance] = useState<any>({
+    primaryColor: "#050505",
+    secondaryColor: "#ff5c00",
+    backgroundColor: "#fcfcfc",
+    textColor: "#1c1917",
+    logoUrl: "https://i.postimg.cc/L6NcpGfc/ELIAS.jpg",
+    navbarLogoUrl: "",
+    footerLogoUrl: "",
+    faviconUrl: "",
+    defaultPropertyImage: "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
+    defaultHeroImage: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1920&q=80",
+    effectsEnabled: true,
+    animationsEnabled: true
+  });
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const confirmId = urlParams.get('confirm_visit');
@@ -2741,6 +3404,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!isAuthLoading && isAuthorized) {
+      seedDefaultSettingsIfEmpty();
+    }
+  }, [isAuthLoading, isAuthorized]);
+
+  useEffect(() => {
     // Só inicia listeners após carregar o auth para evitar permission-denied precoces
     if (isAuthLoading) return;
 
@@ -2761,18 +3430,95 @@ export default function App() {
       });
     }
 
+    // Dynamic collections listeners
+    const unsubTiposImovel = subscribeToCollectionOptions("tiposImovel", setOptTiposImovel);
+    const unsubTiposNegocio = subscribeToCollectionOptions("tiposNegocio", setOptTiposNegocio);
+    const unsubStatusImovel = subscribeToCollectionOptions("statusImovel", setOptStatusImovel);
+    const unsubCidades = subscribeToCollectionOptions("cidades", setOptCidades);
+    const unsubBairros = subscribeToCollectionOptions("bairros", setOptBairros);
+    const unsubCaracteristicas = subscribeToCollectionOptions("caracteristicas", setOptCaracteristicas);
+    const unsubAmbientes = subscribeToCollectionOptions("ambientes", setOptAmbientes);
+    const unsubCaracteristicasEmpreendimento = subscribeToCollectionOptions("caracteristicasEmpreendimento", setOptCaracteristicasEmpreendimento);
+    const unsubLazer = subscribeToCollectionOptions("lazer", setOptLazer);
+    const unsubInstalacoes = subscribeToCollectionOptions("instalacoes", setOptInstalacoes);
+    const unsubAcabamentos = subscribeToCollectionOptions("acabamentos", setOptAcabamentos);
+    const unsubProximidades = subscribeToCollectionOptions("proximidades", setOptProximidades);
+
+    // Site settings real-time bindings
+    const unsubHome = onSnapshot(doc(db, "siteSettings", "home"), (snap) => {
+      if (snap.exists()) setSiteHome(snap.data());
+    }, (error) => console.warn("Permissão de leitura negada para siteSettings/home:", error));
+    
+    const unsubSections = onSnapshot(doc(db, "siteSettings", "sections"), (snap) => {
+      if (snap.exists()) setSiteSections(snap.data());
+    }, (error) => console.warn("Permissão de leitura negada para siteSettings/sections:", error));
+    
+    const unsubCompany = onSnapshot(doc(db, "siteSettings", "company"), (snap) => {
+      if (snap.exists()) setSiteCompany(snap.data());
+    }, (error) => console.warn("Permissão de leitura negada para siteSettings/company:", error));
+    
+    const unsubAppearance = onSnapshot(doc(db, "siteSettings", "appearance"), (snap) => {
+      if (snap.exists()) setSiteAppearance(snap.data());
+    }, (error) => console.warn("Permissão de leitura negada para siteSettings/appearance:", error));
+
     return () => {
       unsubscribeSlots();
       unsubscribeProperties();
       if (unsubscribeVisits) unsubscribeVisits();
+      unsubTiposImovel();
+      unsubTiposNegocio();
+      unsubStatusImovel();
+      unsubCidades();
+      unsubBairros();
+      unsubCaracteristicas();
+      unsubAmbientes();
+      unsubCaracteristicasEmpreendimento();
+      unsubLazer();
+      unsubInstalacoes();
+      unsubAcabamentos();
+      unsubProximidades();
+      unsubHome();
+      unsubSections();
+      unsubCompany();
+      unsubAppearance();
     };
   }, [isAuthorized, isAuthLoading]);
+
+  // Dynamic Theme Integration with siteAppearance and siteCompany
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      if (siteAppearance?.secondaryColor) {
+        root.style.setProperty('--color-brand-orange', siteAppearance.secondaryColor);
+        console.log(`Setting branding orange to: ${siteAppearance.secondaryColor}`);
+      }
+      if (siteAppearance?.primaryColor) {
+        root.style.setProperty('--color-brand-dark', siteAppearance.primaryColor);
+        console.log(`Setting branding dark to: ${siteAppearance.primaryColor}`);
+      }
+      if (siteAppearance?.faviconUrl) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+        link.href = siteAppearance.faviconUrl;
+      }
+      if (siteCompany?.nomeFantasia) {
+        document.title = siteCompany.nomeFantasia;
+      }
+    } catch (e) {
+      console.warn("Error injecting dynamic theme CSS properties or metadata:", e);
+    }
+  }, [siteAppearance, siteCompany]);
 
   const handlePropertyRegistrationClick = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsAdminOpen(true);
   };
   const [searchTerm, setSearchTerm] = useState('');
+  const [purposeFilter, setPurposeFilter] = useState<'Todas' | 'Venda' | 'Locação'>('Todas');
   const [categoryFilter, setCategoryFilter] = useState<'Todas' | 'Residencial' | 'Comercial' | 'Rural'>('Todas');
   const [typeFilter, setTypeFilter] = useState<string>('Todas');
   const [minPrice, setMinPrice] = useState<number | ''>('');
@@ -2825,6 +3571,27 @@ export default function App() {
       const matchesType = typeFilter === 'Todas' || p.type === typeFilter;
       const matchesFavorites = !showOnlyFavorites || userFavorites.includes(String(p.id));
       
+      const propPurpose = p.purpose || p.tipoNegocio || 'Venda';
+      const alugado = p.alugado === true || p.statusLocacao === 'Alugado' || p.gestaoLocacao?.alugado === true;
+      const vendido = p.vendido === true || p.status === 'Vendido' || p.statusVenda === 'Vendido';
+
+      if (vendido) return false;
+
+      let matchesPurpose = false;
+      if (purposeFilter === 'Todas') {
+        if (propPurpose === 'Venda') {
+          matchesPurpose = true;
+        } else if (propPurpose === 'Locação') {
+          matchesPurpose = !alugado;
+        } else if (propPurpose === 'Venda e Locação') {
+          matchesPurpose = true;
+        }
+      } else if (purposeFilter === 'Venda') {
+        matchesPurpose = (propPurpose === 'Venda' || propPurpose === 'Venda e Locação');
+      } else if (purposeFilter === 'Locação') {
+        matchesPurpose = (propPurpose === 'Locação' || propPurpose === 'Venda e Locação') && !alugado;
+      }
+      
       const search = searchTerm.toLowerCase();
       const matchesSearch = !searchTerm || 
                            p.title.toLowerCase().includes(search) ||
@@ -2835,7 +3602,7 @@ export default function App() {
       const matchesMin = minPrice === '' || p.priceValue >= minPrice;
       const matchesMax = maxPrice === '' || p.priceValue <= maxPrice;
 
-      return matchesCategory && matchesType && matchesSearch && matchesMin && matchesMax && matchesFavorites;
+      return matchesCategory && matchesType && matchesPurpose && matchesSearch && matchesMin && matchesMax && matchesFavorites;
     });
 
     if (sortBy === 'price-asc') {
@@ -2843,7 +3610,7 @@ export default function App() {
     }
 
     return result;
-  }, [searchTerm, categoryFilter, typeFilter, minPrice, maxPrice, sortBy, properties]);
+  }, [searchTerm, purposeFilter, categoryFilter, typeFilter, minPrice, maxPrice, sortBy, properties]);
 
   const addProperty = async (newP: Omit<Property, 'id'>) => {
     try {
@@ -2855,17 +3622,17 @@ export default function App() {
   };
 
   const deleteProperty = async (id: string | number) => {
-    if (window.confirm('Tem certeza que deseja remover este imóvel? Esta ação não pode ser desfeita.')) {
-      try {
-        if (typeof id === 'string') {
-          await deletePropertyFromInventory(id);
-          // Removed manual fetch - handled by real-time subscription
-        } else {
-          setProperties(properties.filter(p => p.id !== id));
-        }
-      } catch (error) {
-        alert("Erro ao remover o imóvel.");
+    try {
+      if (typeof id === 'string') {
+        await deletePropertyFromInventory(id);
+        alert("Imóvel removido com sucesso!");
+      } else {
+        setProperties(properties.filter(p => p.id !== id));
+        alert("Imóvel removido com sucesso!");
       }
+    } catch (error) {
+      console.error("Erro ao remover imóvel:", error);
+      alert("Erro ao remover o imóvel.");
     }
   };
 
@@ -2970,7 +3737,13 @@ export default function App() {
             onUpdateProperty={updateProperty}
             onDeleteProperty={deleteProperty}
             onUnblockSlot={async (id) => {
-              await unblockSlot(id);
+              try {
+                await unblockSlot(id);
+                alert("Bloqueio removido com sucesso!");
+              } catch (error) {
+                console.error("Erro ao remover bloqueio:", error);
+                alert("Erro ao remover bloqueio.");
+              }
             }}
             onBlockSlot={async (slot) => {
               await blockSlot(slot);
@@ -3002,10 +3775,28 @@ export default function App() {
               }
             }}
             onDeleteVisit={async (id) => {
-              await deleteVisit(id);
+              try {
+                await deleteVisit(id);
+                alert("Agendamento removido com sucesso!");
+              } catch (error) {
+                console.error("Erro ao remover agendamento:", error);
+                alert("Erro ao remover agendamento.");
+              }
             }}
             onClose={() => setIsAdminOpen(false)} 
             isAuthorized={isAuthorized}
+            optTiposImovel={optTiposImovel}
+            optTiposNegocio={optTiposNegocio}
+            optStatusImovel={optStatusImovel}
+            optCidades={optCidades}
+            optBairros={optBairros}
+            optCaracteristicas={optCaracteristicas}
+            optAmbientes={optAmbientes}
+            optCaracteristicasEmpreendimento={optCaracteristicasEmpreendimento}
+            optLazer={optLazer}
+            optInstalacoes={optInstalacoes}
+            optAcabamentos={optAcabamentos}
+            optProximidades={optProximidades}
           />
         )}
       </AnimatePresence>
@@ -3142,16 +3933,32 @@ export default function App() {
              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           >
             <div className="relative">
-              <div className="w-12 h-12 bg-brand-orange flex items-center justify-center rounded-2xl shadow-[0_10px_30px_rgba(255,92,0,0.4)] rotate-6 group-hover:rotate-0 transition-all duration-500 transform hover:scale-110">
-                <Home className="text-white -rotate-6 group-hover:rotate-0 transition-all duration-500" />
-              </div>
+              {siteAppearance?.logoUrl ? (
+                <div className="w-12 h-12 flex items-center justify-center rounded-2xl overflow-hidden shadow-[0_10px_30px_rgba(255,92,0,0.4)] rotate-6 group-hover:rotate-0 transition-all duration-500 transform hover:scale-110 border border-white/20 bg-black">
+                  <img src={siteAppearance.logoUrl} className="w-full h-full object-cover" alt="Logo" referrerPolicy="no-referrer" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 bg-brand-orange flex items-center justify-center rounded-2xl shadow-[0_10px_30px_rgba(255,92,0,0.4)] rotate-6 group-hover:rotate-0 transition-all duration-500 transform hover:scale-110">
+                  <Home className="text-white -rotate-6 group-hover:rotate-0 transition-all duration-500" />
+                </div>
+              )}
               <div className="absolute -inset-1 bg-brand-orange/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
             <span className="flex flex-col">
               <span className="text-2xl md:text-3xl font-black tracking-tighter leading-none text-white uppercase">
-                RB <span className="text-brand-orange group-hover:tracking-widest transition-all duration-500">SOROCABA</span>
+                {siteCompany?.nomeFantasia ? (
+                  <>
+                    {siteCompany.nomeFantasia.split(" ")[0]} <span className="text-brand-orange group-hover:tracking-widest transition-all duration-500">{siteCompany.nomeFantasia.split(" ").slice(1).join(" ")}</span>
+                  </>
+                ) : (
+                  <>
+                    RB <span className="text-brand-orange group-hover:tracking-widest transition-all duration-500">SOROCABA</span>
+                  </>
+                )}
               </span>
-              <span className="text-[8px] md:text-[9px] font-black tracking-[0.5em] uppercase opacity-40 text-white leading-none mt-1">NEGÓCIOS IMOBILIÁRIOS</span>
+              <span className="text-[8px] md:text-[9px] font-black tracking-[0.5em] uppercase opacity-40 text-white leading-none mt-1">
+                {siteCompany?.creciPj || "NEGÓCIOS IMOBILIÁRIOS"}
+              </span>
             </span>
           </div>
 
@@ -3380,77 +4187,90 @@ export default function App() {
           >
             {/* --- Hero Section --- */}
             <section className="relative h-auto md:h-screen min-h-[85vh] flex items-start md:items-center pt-32 pb-16 md:pt-20 overflow-hidden">
-        <motion.div 
-          initial={{ scale: 1.1 }}
-          animate={{ scale: 1 }}
-          transition={{ duration: 2.5, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute inset-0 z-0"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent z-10" />
-          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent z-10" />
-          <img 
-            src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop" 
-            alt="Luxury Home"
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
-        </motion.div>
+              <motion.div 
+                initial={{ scale: 1.1 }}
+                animate={{ scale: 1 }}
+                transition={{ duration: 2.5, ease: [0.16, 1, 0.3, 1] }}
+                className="absolute inset-0 z-0"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent z-10" />
+                <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent z-10" />
+                <img 
+                  src={siteHome?.homeBackgroundImage || "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=2070&auto=format&fit=crop"} 
+                  alt="Luxury Home"
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </motion.div>
 
-        <div className="container mx-auto px-6 relative z-20">
-          <div className="max-w-4xl">
-            <motion.div
-              initial={{ opacity: 0, x: -30 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.8 }}
-            >
-              <div className="flex items-center space-x-3 mb-4 md:mb-6">
-                <div className="h-[1.5px] w-10 md:w-12 bg-brand-orange" />
-                <span className="text-brand-orange font-bold uppercase tracking-[0.3em] text-[10px] md:text-xs">Exclusividade em Sorocaba</span>
-              </div>
-              <h1 className="text-3xl md:text-6xl lg:text-7xl text-white font-black leading-[1] md:leading-[0.85] mb-5 md:mb-8 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-                SUA PRÓXIMA <br className="hidden md:block" />
-                <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>CONQUISTA</span>
-              </h1>
-              <p className="text-xs md:text-lg text-white/70 mb-6 md:mb-10 max-w-2xl leading-relaxed font-medium md:border-l border-white/20 md:pl-8">
-                Curadoria especializada dos imóveis mais desejados da região. <br className="hidden md:block" />
-                Arquitetura, luxo e o endereço que você sempre sonhou.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-5 md:gap-6 mb-12 md:mb-12">
-                <a href="#properties" className="btn-primary !px-6 md:!px-12 !py-4 md:!py-6 text-sm md:text-lg group relative overflow-hidden flex items-center justify-center">
-                  <span className="relative z-10 flex items-center">
-                    Explorar Imóveis 
-                    <ChevronRight className="group-hover:translate-x-2 transition-transform ml-2" />
-                  </span>
-                  <div className="absolute inset-0 bg-white/10 -translate-x-full group-hover:translate-x-0 transition-transform duration-500" />
-                </a>
-                <a 
-                  href="#contact"
-                  onClick={handlePropertyRegistrationClick}
-                  className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-6 md:px-12 py-4 md:py-6 rounded-full font-black transition-all border border-white/10 flex items-center justify-center gap-3 group text-sm md:text-base ring-1 ring-white/5 hover:ring-brand-orange/40"
-                >
-                  {isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel'}
-                  <div className="w-6 h-6 md:w-10 md:h-10 rounded-full bg-brand-orange flex items-center justify-center group-hover:rotate-90 transition-transform duration-500 shadow-lg shadow-orange-500/30">
-                    <Plus size={14} md:size={18} className="text-white" />
-                  </div>
-                </a>
-              </div>
-            </motion.div>
+              <div className="container mx-auto px-6 relative z-20">
+                <div className="max-w-4xl">
+                  <motion.div
+                    initial={{ opacity: 0, x: -30 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.8 }}
+                  >
+                    <div className="flex items-center space-x-3 mb-4 md:mb-6">
+                      <div className="h-[1.5px] w-10 md:w-12 bg-brand-orange" />
+                      <span className="text-brand-orange font-bold uppercase tracking-[0.3em] text-[10px] md:text-xs">
+                        {siteHome?.homeBadge || "Exclusividade em Sorocaba"}
+                      </span>
+                    </div>
+                    <h1 className="text-2xl sm:text-3xl md:text-5xl lg:text-6xl text-white font-black leading-[1.1] md:leading-[1] mb-3 md:mb-5 tracking-tighter uppercase drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+                      {siteHome?.homeTitle ? (
+                        <>
+                          {siteHome.homeTitle.split(" ").slice(0, -1).join(" ")}{" "}
+                          <br className="hidden md:block" />
+                          <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>
+                            {siteHome.homeTitle.split(" ").slice(-1)[0]}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          SUA PRÓXIMA <br className="hidden md:block" />
+                          <span className="text-transparent hover:text-brand-orange transition-all duration-700 cursor-default" style={{ WebkitTextStroke: '1.5px rgba(255,255,255,0.8)' }}>CONQUISTA</span>
+                        </>
+                      )}
+                    </h1>
+                    <p className="text-xs md:text-sm text-white/70 mb-4 md:mb-6 max-w-2xl leading-relaxed font-medium md:border-l border-white/20 md:pl-6">
+                      {siteHome?.homeSubtitle || "Curadoria especializada dos imóveis mais desejados da região. Arquitetura, luxo e o endereço que você sempre sonhou."}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-4 md:gap-5 mb-8 md:mb-10">
+                      <a href={siteHome?.homePrimaryButtonLink || "#properties"} className="btn-primary !px-5 md:!px-10 !py-3.5 md:!py-5 text-xs md:text-base group relative overflow-hidden flex items-center justify-center">
+                        <span className="relative z-10 flex items-center">
+                          {siteHome?.homePrimaryButtonText || "Explorar Imóveis"} 
+                          <ChevronRight className="group-hover:translate-x-2 transition-transform ml-2" />
+                        </span>
+                        <div className="absolute inset-0 bg-white/10 -translate-x-full group-hover:translate-x-0 transition-transform duration-500" />
+                      </a>
+                      <a 
+                        href={siteHome?.homeSecondaryButtonLink || "#contact"}
+                        onClick={siteHome?.homeSecondaryButtonLink ? undefined : handlePropertyRegistrationClick}
+                        className="bg-white/5 hover:bg-white/10 backdrop-blur-xl text-white px-5 md:px-10 py-3.5 md:py-5 rounded-full font-black transition-all border border-white/10 flex items-center justify-center gap-3 group text-xs md:text-sm ring-1 ring-white/5 hover:ring-brand-orange/40"
+                      >
+                        {siteHome?.homeSecondaryButtonText || (isAuthorized ? 'Gerenciar Imóveis' : 'Anunciar meu Imóvel')}
+                        <div className="w-5 h-5 md:w-8 md:h-8 rounded-full bg-brand-orange flex items-center justify-center group-hover:rotate-90 transition-transform duration-500 shadow-lg shadow-orange-500/30">
+                          <Plus size={12} className="text-white" />
+                        </div>
+                      </a>
+                    </div>
+                  </motion.div>
 
             {/* Advanced Search Bar - Refined for Mobile */}
             <motion.div 
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.8 }}
-              className="bg-black/90 backdrop-blur-3xl p-3 md:p-6 rounded-2xl md:rounded-[2.5rem] shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-3 md:gap-5 border border-white/10"
+               initial={{ opacity: 0, y: 30 }}
+               animate={{ opacity: 1, y: 0 }}
+               transition={{ delay: 0.3, duration: 0.8 }}
+               className="bg-black/90 backdrop-blur-3xl p-3 md:p-5 rounded-2xl shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-2.5 md:gap-4 border border-white/10"
             >
               <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-4">
                 <div className="flex-1 relative">
-                  <div className="flex items-center px-4 md:px-5 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-2.5 md:py-3.5 group focus-within:border-brand-orange transition-all shadow-inner">
-                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={16} md:size={20} />
+                  <div className="flex items-center px-4 md:px-5 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-2 py-3 group focus-within:border-brand-orange transition-all shadow-inner">
+                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={16} md:size={18} />
                     <input 
                       type="text" 
                       placeholder="Localização, bairro ou condomínio..." 
-                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-xs md:text-lg"
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-xs md:text-base"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -3488,6 +4308,21 @@ export default function App() {
                   </AnimatePresence>
                 </div>
                 
+                <div className="md:w-64 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 px-5 py-3 md:py-3.5 relative group focus-within:border-brand-orange transition-all shadow-inner">
+                  <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Finalidade</span>
+                  <select 
+                    className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-[10px] md:text-xs tracking-widest"
+                    value={purposeFilter}
+                    onChange={(e) => {
+                      setPurposeFilter(e.target.value as any);
+                    }}
+                  >
+                    <option value="Todas" className="bg-brand-dark">Venda & Locação (Todas)</option>
+                    <option value="Venda" className="bg-brand-dark">Venda</option>
+                    <option value="Locação" className="bg-brand-dark">Locação</option>
+                  </select>
+                </div>
+
                 <div className="md:w-64 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 px-5 py-3 md:py-3.5 relative group focus-within:border-brand-orange transition-all shadow-inner">
                   <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Categoria</span>
                   <select 

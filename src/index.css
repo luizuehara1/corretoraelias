@@ -63,3 +63,56 @@
   border-radius: 2rem;
   z-index: 1;
 }
+
+/* ==========================================
+   PREMIUM PORTAL FORM FIELDS CUSTOM ENGINE
+   ========================================== */
+main form input[type="text"],
+main form input[type="number"],
+main form input[type="email"],
+main form input[type="password"],
+main form input[type="tel"],
+main form select,
+main form textarea {
+  background-color: #F7F7F5 !important;
+  border: 1px solid #E7E7E7 !important;
+  border-radius: 0.75rem !important; /* rounded-xl */
+  padding: 0.85rem 1.15rem !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: #111111 !important;
+  outline: none !important;
+  transition: all 0.25s ease !important;
+}
+
+main form input[type="text"]:focus,
+main form input[type="number"]:focus,
+main form input[type="email"]:focus,
+main form input[type="password"]:focus,
+main form input[type="tel"]:focus,
+main form select:focus,
+main form textarea:focus {
+  border-color: #F5B400 !important;
+  box-shadow: 0 0 0 1px #F5B400 !important;
+  background-color: #FFFFFF !important;
+}
+
+main form label {
+  text-transform: uppercase !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.1em !important;
+  color: #7A7F8C !important;
+  display: block !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Custom styled card */
+.admin-card {
+  background: #FFFFFF;
+  border: 1px solid #E7E7E7;
+  border-radius: 1.5rem; /* 24px */
+  padding: 2rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+}
+
