@@ -50,7 +50,8 @@ import {
   LogOut,
   Globe,
   FileText,
-  PlusCircle
+  PlusCircle,
+  SlidersHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -89,7 +90,9 @@ import {
   deleteVisit,
   subscribeToCollectionOptions,
   publishPropertyToSite,
-  seedDefaultSettingsIfEmpty
+  seedDefaultSettingsIfEmpty,
+  getImovelByCodigo,
+  getPrefixoCodigoImovel
 } from './lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { exportReportToPDF, generateFullCatalogPDF } from './lib/pdfExport';
@@ -139,6 +142,7 @@ interface Property {
   type: string;
   propertyType: string;
   beds?: number; // Quartos
+  bedrooms?: number; // Quartos (alternative name)
   suites?: number;
   baths?: number; // Banheiros
   parkingCovered?: number; // Vagas
@@ -162,6 +166,7 @@ interface Property {
   proximidades?: string[];
   codigo?: string;
   codigoImovel?: string;
+  cep?: string; // CEP do imóvel
   publicado?: boolean;
   publicadoNoSite?: boolean;
   mostrarNosFiltros?: boolean;
@@ -225,6 +230,15 @@ interface Property {
     permitirVisitaMesmoAlugado?: boolean;
     manterDisponivelParaVenda?: boolean;
   };
+  
+  // Responsible Broker Fields
+  corretorId?: string;
+  corretorNome?: string;
+  corretorTelefone?: string;
+  corretorWhatsapp?: string;
+  corretorEmail?: string;
+  corretorCreci?: string;
+  corretorFoto?: string;
 }
 
 interface Testimonial {
@@ -309,6 +323,347 @@ const formatCurrency = (value: number | "") => {
     maximumFractionDigits: 0,
   }).format(value);
 };
+
+function normalizarTexto(texto: string): string {
+  return String(texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function parseBuscaRapida(query: string) {
+  const result: {
+    texto: string;
+    tipoImovel: string;
+    dormitoriosMin: number | null;
+    bairro: string;
+    cidade: string;
+    valorMax: number | null;
+    finalidade: string;
+    condominio: boolean | null;
+    piscina: boolean | null;
+  } = {
+    texto: query,
+    tipoImovel: "",
+    dormitoriosMin: null,
+    bairro: "",
+    cidade: "",
+    valorMax: null,
+    finalidade: "",
+    condominio: null,
+    piscina: null
+  };
+
+  if (!query) return result;
+
+  const normalized = normalizarTexto(query);
+
+  // 1. Finalidade (Aluguel, Venda, Comprar)
+  if (normalized.includes("aluguel") || normalized.includes("alugar") || normalized.includes("locacao")) {
+    result.finalidade = "Locação";
+  } else if (normalized.includes("venda") || normalized.includes("comprar") || normalized.includes("compra")) {
+    result.finalidade = "Venda";
+  }
+
+  // 2. Tipo de imóvel
+  if (normalized.includes("casa")) {
+    result.tipoImovel = "Casa";
+  } else if (normalized.includes("apartamento") || normalized.includes("apto") || normalized.includes("aptos") || normalized.includes("dormitorios")) {
+    result.tipoImovel = "Apartamento";
+  } else if (normalized.includes("terreno") || normalized.includes("lote")) {
+    result.tipoImovel = "Terreno";
+  } else if (normalized.includes("sobrado")) {
+    result.tipoImovel = "Sobrado";
+  } else if (normalized.includes("comercial") || normalized.includes("sala comercial") || normalized.includes("predio")) {
+    result.tipoImovel = "Comercial";
+  } else if (normalized.includes("chacara") || normalized.includes("sitio") || normalized.includes("fazenda")) {
+    result.tipoImovel = "Chácara";
+  }
+
+  // 3. Dormitórios / Quartos
+  const quartRegex = /(\d+)\s*(quartos?|dormitorios?|dorms?|qtos?|suites?|suítes?)/i;
+  const matchQuart = query.match(quartRegex);
+  if (matchQuart) {
+    result.dormitoriosMin = parseInt(matchQuart[1], 10);
+  }
+
+  // 4. Bairros
+  const commonBairros = [
+    "Campolim", "Centro", "Jardim Europa", "Jardim Sao Carlos", "Jardim Faculdade",
+    "Parque Campolim", "Wanel Ville", "Eden", "Alem Ponte", "Vila Haro", "Jardim Simus",
+    "Jardim Pagliato", "Jardim Vergueiro", "Trujillo", "Santa Rosalia", "Jardim America",
+    "Jardim Emilia", "Vila Jardini", "Brigadeiro Tobias", "Ipanema das Pedras", "Cajuru",
+    "Aparecidinha", "Zona Industrial"
+  ];
+  for (const bairro of commonBairros) {
+    if (normalizarTexto(bairro).split(" ").every(word => normalized.includes(word))) {
+      result.bairro = bairro;
+      break;
+    }
+  }
+
+  // 5. Cidades
+  if (normalized.includes("sorocaba")) {
+    result.cidade = "Sorocaba";
+  } else if (normalized.includes("votorantim")) {
+    result.cidade = "Votorantim";
+  } else if (normalized.includes("itu")) {
+    result.cidade = "Itu";
+  }
+
+  // 6. Condomínio
+  if (normalized.includes("condominio") || normalized.includes("fechado")) {
+    result.condominio = true;
+  }
+
+  // 7. Piscina
+  if (normalized.includes("piscina")) {
+    result.piscina = true;
+  }
+
+  // 8. Valor Max (até 500 mil, ate 1 milhao, ate 2.5 milhoes)
+  const valRegex = /(?:ate|ateh|maximo|valor|preco|investimento)?\s*(\d+(?:[.,]\d+)?)\s*(mil|milhao|milhoes|m)\b/i;
+  const matchVal = normalized.match(valRegex);
+  if (matchVal) {
+    let num = parseFloat(matchVal[1].replace(",", "."));
+    const unit = matchVal[2].toLowerCase();
+    if (unit.startsWith("mil") && !unit.startsWith("milhao") && !unit.startsWith("milhoe")) {
+      num = num * 1000;
+    } else if (unit.startsWith("milhao") || unit.startsWith("milhoe") || unit === "m") {
+      num = num * 1000000;
+    }
+    result.valorMax = num;
+  } else {
+    const numRegex = /(?:ate|ateh|maximo)\s*(?:r\$)?\s*(\d{1,3}(?:\.\d{3})*(?:,\d+)?)/i;
+    const matchNum = query.match(numRegex);
+    if (matchNum) {
+      const parsedVal = parseFloat(matchNum[1].replace(/\./g, '').replace(',', '.'));
+      if (!isNaN(parsedVal)) {
+        result.valorMax = parsedVal;
+      }
+    }
+  }
+
+  return result;
+}
+
+function filtrarImoveis(imoveis: Property[], filtros: any): Property[] {
+  return imoveis.filter((imovel) => {
+    // 1. Aplicar status publicado
+    const publicado = imovel.publicado === true || imovel.publicadoNoSite === true;
+    if (imovel.publicado !== undefined && !publicado) return false;
+
+    // Status do imóvel não deve ser vendido/inativo
+    const vendido = imovel.vendido === true || imovel.status === 'Vendido' || imovel.status === 'vendido' || imovel.statusVenda === 'Vendido';
+    if (vendido) return false;
+    
+    // 2. Aplicar busca rápida inteligente
+    let matchesBuscaRapida = true;
+    if (filtros.buscaRapidaTermo) {
+      const parsed = parseBuscaRapida(filtros.buscaRapidaTermo);
+      const s = normalizarTexto(filtros.buscaRapidaTermo);
+      
+      const textToSearch = [
+        imovel.tituloAnuncio,
+        imovel.title,
+        imovel.description,
+        imovel.descricaoCurta,
+        imovel.descricaoDetalhada,
+        imovel.type,
+        imovel.propertyType,
+        imovel.purpose,
+        imovel.tipoNegocio,
+        imovel.category,
+        imovel.neighborhood,
+        imovel.city,
+        imovel.location,
+        imovel.cep,
+        imovel.codigo,
+        imovel.codigoImovel,
+        imovel.caracteristicas ? imovel.caracteristicas.join(" ") : "",
+        imovel.ambientes ? imovel.ambientes.join(" ") : "",
+        imovel.proximidades ? imovel.proximidades.join(" ") : "",
+        imovel.lazer ? imovel.lazer.join(" ") : "",
+        imovel.acabamentos ? imovel.acabamentos.join(" ") : "",
+        imovel.instalacoes ? imovel.instalacoes.join(" ") : ""
+      ].map(normalizarTexto).join(" ");
+      
+      let textMatch = textToSearch.includes(s);
+      
+      if (parsed.tipoImovel) {
+        const t = normalizarTexto(imovel.type || imovel.propertyType || '');
+        if (!t.includes(normalizarTexto(parsed.tipoImovel))) {
+          textMatch = false;
+        }
+      }
+      
+      if (parsed.dormitoriosMin) {
+        const beds = imovel.beds || imovel.bedrooms || 0;
+        if (beds < parsed.dormitoriosMin) {
+          textMatch = false;
+        }
+      }
+
+      if (parsed.bairro) {
+        const b = normalizarTexto(imovel.neighborhood || '');
+        if (!b.includes(normalizarTexto(parsed.bairro))) {
+          textMatch = false;
+        }
+      }
+
+      if (parsed.cidade) {
+        const c = normalizarTexto(imovel.city || '');
+        if (!c.includes(normalizarTexto(parsed.cidade))) {
+          textMatch = false;
+        }
+      }
+
+      if (parsed.valorMax) {
+        const price = imovel.priceValue || 0;
+        if (price > parsed.valorMax) {
+          textMatch = false;
+        }
+      }
+
+      if (parsed.finalidade) {
+        const propPurpose = imovel.purpose || imovel.tipoNegocio || 'Venda';
+        const fp = parsed.finalidade;
+        if (fp === 'Locação') {
+          if (propPurpose !== 'Locação' && propPurpose !== 'Venda e Locação') {
+            textMatch = false;
+          }
+        } else if (fp === 'Venda') {
+          if (propPurpose !== 'Venda' && propPurpose !== 'Venda e Locação') {
+            textMatch = false;
+          }
+        }
+      }
+
+      if (parsed.condominio) {
+        const isCondo = !!imovel.condominium || 
+                        (imovel.caracteristicas && imovel.caracteristicas.some(c => normalizarTexto(c).includes("condominio")));
+        if (!isCondo) {
+          textMatch = false;
+        }
+      }
+
+      if (parsed.piscina) {
+        const hasPiscina = (imovel.lazer && imovel.lazer.some(l => normalizarTexto(l).includes("piscina"))) ||
+                           (imovel.caracteristicas && imovel.caracteristicas.some(c => normalizarTexto(c).includes("piscina")));
+        if (!hasPiscina) {
+          textMatch = false;
+        }
+      }
+
+      matchesBuscaRapida = textMatch || textToSearch.includes(s) || s.split(" ").every(word => textToSearch.includes(word));
+    }
+
+    // 3. Aplicar finalidade
+    let matchesFinalidade = true;
+    if (filtros.finalidade && filtros.finalidade !== 'Todas') {
+      const propPurpose = imovel.purpose || imovel.tipoNegocio || 'Venda';
+      const alugado = imovel.alugado === true || imovel.statusLocacao === 'Alugado' || imovel.gestaoLocacao?.alugado === true;
+      if (filtros.finalidade === 'Venda') {
+        matchesFinalidade = propPurpose === 'Venda' || propPurpose === 'Venda e Locação';
+      } else if (filtros.finalidade === 'Locação') {
+        matchesFinalidade = (propPurpose === 'Locação' || propPurpose === 'Venda e Locação') && !alugado;
+      }
+    }
+
+    // 4. Aplicar categoria
+    const matchesCategoria = !filtros.categoria || filtros.categoria === 'Todas' || imovel.category === filtros.categoria;
+
+    // 5. Aplicar tipo
+    const matchesTipo = !filtros.tipo || filtros.tipo === 'Todas' || imovel.type === filtros.tipo;
+
+    // 6. Aplicar bairro
+    let matchesBairro = true;
+    if (filtros.bairro && filtros.bairro !== 'Todos') {
+      const bNormal = normalizarTexto(imovel.neighborhood || '');
+      const fNormal = normalizarTexto(filtros.bairro);
+      matchesBairro = bNormal === fNormal || bNormal.includes(fNormal);
+    }
+
+    // 7. Aplicar CEP:
+    let matchesCep = true;
+    if (filtros.cep) {
+      const cleanImovelCep = String(imovel.cep || '').replace(/\D/g, '');
+      const cleanFiltroCep = String(filtros.cep).replace(/\D/g, '');
+      if (cleanFiltroCep) {
+        const exactCepMatchesExist = filtros.exactCepMatchesExist;
+        if (exactCepMatchesExist) {
+          matchesCep = cleanImovelCep === cleanFiltroCep;
+        } else {
+          let matchesRegion = false;
+          if (filtros.cepBairro) {
+            matchesRegion = normalizarTexto(imovel.neighborhood || '').includes(normalizarTexto(filtros.cepBairro));
+          }
+          if (filtros.cepCidade) {
+            matchesRegion = matchesRegion || normalizarTexto(imovel.city || '').includes(normalizarTexto(filtros.cepCidade));
+          }
+          matchesCep = matchesRegion || cleanImovelCep === cleanFiltroCep;
+        }
+      }
+    }
+
+    // 8. Aplicar quartos (dormitórios)
+    let matchesQuartos = true;
+    if (filtros.quartos && filtros.quartos !== '') {
+      const beds = imovel.beds || imovel.bedrooms || 0;
+      matchesQuartos = beds >= Number(filtros.quartos);
+    }
+
+    // Suites
+    let matchesSuites = true;
+    if (filtros.suites && filtros.suites !== '') {
+      const suites = imovel.suites || 0;
+      matchesSuites = suites >= Number(filtros.suites);
+    }
+
+    // Vagas
+    let matchesVagas = true;
+    if (filtros.vagas && filtros.vagas !== '') {
+      const vacancies = (imovel.parkingCovered || 0) + (imovel.parkingUncovered || 0);
+      matchesVagas = vacancies >= Number(filtros.vagas);
+    }
+
+    // Area
+    let matchesArea = true;
+    const areaVal = parseFloat(imovel.area) || parseFloat(imovel.areaUseful || '0') || 0;
+    if (filtros.areaMin && filtros.areaMin !== '') {
+      matchesArea = matchesArea && areaVal >= Number(filtros.areaMin);
+    }
+    if (filtros.areaMax && filtros.areaMax !== '') {
+      matchesArea = matchesArea && areaVal <= Number(filtros.areaMax);
+    }
+
+    // 9. Aplicar valor mínimo e máximo
+    let matchesPreco = true;
+    const isVenda = (filtros.finalidade === 'Venda');
+    const isLocacao = (filtros.finalidade === 'Locação');
+    
+    let priceToCompare = imovel.priceValue || 0;
+    if (isLocacao && imovel.valorAluguel) {
+      priceToCompare = imovel.valorAluguel;
+    } else if (isVenda && imovel.valorVenda) {
+      priceToCompare = imovel.valorVenda;
+    } else {
+      priceToCompare = imovel.priceValue || 0;
+    }
+
+    if (filtros.valorMin && filtros.valorMin !== '') {
+      matchesPreco = matchesPreco && priceToCompare >= Number(filtros.valorMin);
+    }
+    if (filtros.valorMax && filtros.valorMax !== '') {
+      matchesPreco = matchesPreco && priceToCompare <= Number(filtros.valorMax);
+    }
+
+    // Favoritos
+    const matchesFavorites = !filtros.showOnlyFavorites || (filtros.userFavorites && filtros.userFavorites.includes(String(imovel.id)));
+
+    return matchesBuscaRapida && matchesFinalidade && matchesCategoria && matchesTipo && matchesBairro && matchesCep && matchesQuartos && matchesSuites && matchesVagas && matchesArea && matchesPreco && matchesFavorites;
+  });
+}
 
 const getVideoEmbedUrl = (url?: string) => {
   if (!url) return null;
@@ -643,7 +998,44 @@ function VisitRegistrationOverlay({
   );
 }
 
-function PropertyDetailModal({ property, onClose }: { property: Property; onClose: () => void }) {
+function getWhatsappImovelLink(property: any, companyWhatsapp: string = "5515991143213") {
+  const brokerWhatsapp = property.corretorWhatsapp || property.corretorWhatsApp;
+  const brokerTelefone = property.corretorTelefone;
+  let rawPhone = brokerWhatsapp || brokerTelefone || companyWhatsapp;
+  
+  let cleanPhone = rawPhone.replace(/\D/g, '');
+  if (cleanPhone.length > 0) {
+    if (cleanPhone.length === 11 && cleanPhone.startsWith('15')) {
+      cleanPhone = '55' + cleanPhone;
+    } else if (cleanPhone.length === 10 && cleanPhone.startsWith('15')) {
+      cleanPhone = '55' + cleanPhone;
+    } else if (cleanPhone.length === 11 && !cleanPhone.startsWith('55')) {
+      cleanPhone = '55' + cleanPhone;
+    } else if (cleanPhone.length === 9) {
+      cleanPhone = '5515' + cleanPhone;
+    } else if (cleanPhone.length === 8) {
+      cleanPhone = '55159' + cleanPhone;
+    }
+  } else {
+    cleanPhone = '5515991143213';
+  }
+
+  // Use property.textoWhatsapp if generated by IA, or a friendly preset
+  const presetText = property.textoWhatsapp || property.publicacao?.textoWhatsapp || `Olá! Gostaria de falar sobre o imóvel: ${property.title} (Código: ${property.codigoImovel || property.codigo || property.id})`;
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(presetText)}`;
+}
+
+function PropertyDetailModal({ 
+  property, 
+  onClose,
+  onSelectPropertyForVisit,
+  siteCompany
+}: { 
+  property: Property; 
+  onClose: () => void;
+  onSelectPropertyForVisit?: (p: Property) => void;
+  siteCompany?: any;
+}) {
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   
   const mediaItems = [
@@ -992,19 +1384,94 @@ function PropertyDetailModal({ property, onClose }: { property: Property; onClos
                    </div>
                 )}
 
-                <div className="pt-4 border-t border-white/10">
-                  <button
-                    onClick={() => {
-                      const code = property.codigoImovel || property.codigo || property.id;
-                      const url = `${window.location.origin}/imovel/${code}`;
-                      navigator.clipboard.writeText(url);
-                      alert(`Link público copiado:\n${url}`);
-                    }}
-                    className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-3 px-4 rounded-xl text-xs md:text-sm transition-all flex items-center justify-center gap-3 border border-white/5 uppercase tracking-widest"
-                  >
-                    <Share2 size={16} />
-                    <span>Copiar Link de Compartilhamento</span>
-                  </button>
+                {/* BLOC DE ATENDIMENTO EXCLUSIVO DO CORRETOR OU INSTITUCIONAL */}
+                <div className="pt-6 border-t border-white/10 space-y-4">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">
+                    Atendimento Exclusivo
+                  </h4>
+                  
+                  {property.corretorId && property.corretorNome ? (
+                    <div className="bg-white/5 p-5 rounded-2xl border border-white/5 flex gap-4 items-center">
+                      {property.corretorFoto ? (
+                        <img 
+                          src={property.corretorFoto} 
+                          alt={property.corretorNome} 
+                          className="w-16 h-16 rounded-full object-cover border-2 border-brand-orange/30 shrink-0"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-brand-orange/10 border-2 border-brand-orange/30 shrink-0 flex items-center justify-center text-brand-orange font-black text-lg">
+                          {property.corretorNome.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white uppercase tracking-tight truncate">{property.corretorNome}</p>
+                        <p className="text-[10px] text-brand-orange font-bold uppercase tracking-wider mt-0.5">
+                          {property.corretorCreci ? `CRECI: ${property.corretorCreci}` : 'Consultor RB Sorocaba'}
+                        </p>
+                        <div className="text-[10px] text-white/50 font-semibold mt-1 space-y-0.5">
+                          {property.corretorTelefone && <p>📞 {property.corretorTelefone}</p>}
+                          {property.corretorEmail && <p className="truncate">✉️ {property.corretorEmail}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white/5 p-5 rounded-2xl border border-white/5 flex gap-4 items-center">
+                      <div className="w-16 h-16 rounded-full bg-brand-orange/20 border-2 border-brand-orange shrink-0 flex items-center justify-center text-brand-orange font-black text-xl">
+                        RB
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white uppercase tracking-tight truncate">
+                          {siteCompany?.nomeFantasia || "RB Sorocaba Negócios Imobiliários"}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                          Atendimento Institucional VIP
+                        </p>
+                        <div className="text-[10px] text-white/50 font-semibold mt-1 space-y-0.5">
+                          <p>📞 {siteCompany?.telefone || "(15) 99114-3213"}</p>
+                          <p className="truncate">✉️ {siteCompany?.email || "atendimento@rbsorocaba.com.br"}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ACTION CTAs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <a
+                      href={getWhatsappImovelLink(property, siteCompany?.whatsapp || "5515991143213")}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-[#128C7E] hover:bg-[#075E54] text-white font-black py-4 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 uppercase tracking-wider shadow-lg shadow-green-900/10 active:scale-98"
+                    >
+                      <MessageCircle size={16} />
+                      <span>Falar no WhatsApp</span>
+                    </a>
+
+                    {onSelectPropertyForVisit && (
+                      <button
+                        onClick={() => onSelectPropertyForVisit(property)}
+                        className="bg-brand-orange hover:bg-orange-600 text-white font-black py-4 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 uppercase tracking-wider shadow-lg shadow-orange-950/20 active:scale-98"
+                      >
+                        <Calendar size={16} />
+                        <span>Agendar Visita VIP</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={() => {
+                        const code = property.codigoImovel || property.codigo || property.id;
+                        const url = `${window.location.origin}/imovel/${code}`;
+                        navigator.clipboard.writeText(url);
+                        alert(`Link público copiado:\n${url}`);
+                      }}
+                      className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-3 px-4 rounded-xl text-[10px] md:text-sm transition-all flex items-center justify-center gap-3 border border-white/5 uppercase tracking-widest"
+                    >
+                      <Share2 size={14} />
+                      <span>Copiar Link de Compartilhamento</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1868,7 +2335,12 @@ function InlineAdminPortal({
           {viewingProperty && (
             <PropertyDetailModal 
               property={viewingProperty} 
-              onClose={() => setViewingProperty(null)} 
+              onClose={() => {
+                setViewingProperty(null);
+                if (window.location.pathname !== "/") {
+                  window.history.pushState({}, document.title, "/");
+                }
+              }} 
             />
           )}
         </AnimatePresence>
@@ -2676,12 +3148,14 @@ function PropertyCard({
   property, 
   onSelect, 
   isFavorite, 
-  onToggleFavorite 
+  onToggleFavorite,
+  onViewDetails
 }: { 
   property: Property; 
   onSelect: (p: Property) => void;
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
+  onViewDetails?: (p: Property) => void;
 }) {
   const [isHoveringPrice, setIsHoveringPrice] = useState(false);
   return (
@@ -2692,8 +3166,18 @@ function PropertyCard({
       viewport={{ once: true, margin: "-100px" }}
       transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
       className="bg-white rounded-[2.5rem] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.02)] hover:shadow-[0_40px_80px_rgba(0,0,0,0.1)] transition-all duration-700 group border border-slate-100/50 hover:border-brand-orange/20 cursor-pointer relative"
+      onClick={() => {
+        if (onViewDetails) {
+          onViewDetails(property);
+        }
+      }}
     >
-      <div className="relative aspect-[4/3] overflow-hidden" onClick={() => onSelect(property)}>
+      <div className="relative aspect-[4/3] overflow-hidden" onClick={(e) => {
+        if (onViewDetails) {
+          e.stopPropagation();
+          onViewDetails(property);
+        }
+      }}>
         <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition-all duration-500 z-10" />
         <img 
           src={property.image} 
@@ -3250,6 +3734,7 @@ function ConfirmVisitModal({ visitId, onClose }: { visitId: string; onClose: () 
 
 export default function App() {
   const [properties, setProperties] = useState<Property[]>([]);
+  const [viewingProperty, setViewingProperty] = useState<Property | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -3280,6 +3765,23 @@ export default function App() {
   const [optInstalacoes, setOptInstalacoes] = useState<any[]>([]);
   const [optAcabamentos, setOptAcabamentos] = useState<any[]>([]);
   const [optProximidades, setOptProximidades] = useState<any[]>([]);
+  const [optCategoriasImovel, setOptCategoriasImovel] = useState<any[]>([]);
+  const [dbBrokers, setDbBrokers] = useState<any[]>([]);
+  const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
+
+  const navigateTo = (path: string) => {
+    window.history.pushState({}, "", path);
+    setCurrentPath(path);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // Site settings dynamic states with seeded fallbacks
   const [siteHome, setSiteHome] = useState<any>({
@@ -3366,6 +3868,41 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleUrlPathRouting = async () => {
+      const path = window.location.pathname;
+      if (path.startsWith("/imovel/")) {
+        const codigo = decodeURIComponent(path.replace("/imovel/", "")).trim();
+        if (codigo) {
+          try {
+            const prop = await getImovelByCodigo(codigo);
+            if (prop) {
+              setViewingProperty(prop);
+              
+              // Correct any spelling/casing/raw-ID redirects
+              const correctCode = prop.codigoImovel || prop.codigo;
+              if (correctCode && correctCode.toLowerCase() !== codigo.toLowerCase()) {
+                window.history.replaceState({}, document.title, `/imovel/${correctCode}`);
+              }
+            } else {
+              // If not found, revert gently to home
+              window.history.replaceState({}, document.title, "/");
+            }
+          } catch (error) {
+            console.error("Erro ao carregar imóvel pela rota pública:", error);
+          }
+        }
+      }
+    };
+
+    window.addEventListener("popstate", handleUrlPathRouting);
+    handleUrlPathRouting();
+
+    return () => {
+      window.removeEventListener("popstate", handleUrlPathRouting);
+    };
+  }, []);
+
+  useEffect(() => {
     let unsubscribeFavorites: (() => void) | undefined;
 
     if (currentUser) {
@@ -3443,6 +3980,17 @@ export default function App() {
     const unsubInstalacoes = subscribeToCollectionOptions("instalacoes", setOptInstalacoes);
     const unsubAcabamentos = subscribeToCollectionOptions("acabamentos", setOptAcabamentos);
     const unsubProximidades = subscribeToCollectionOptions("proximidades", setOptProximidades);
+    const unsubCategoriasImovel = subscribeToCollectionOptions("categoriasImovel", setOptCategoriasImovel);
+
+    const qBrokers = query(collection(db, "corretores"), where("ativo", "==", true));
+    const unsubBrokers = onSnapshot(qBrokers, (snap) => {
+      const list: any[] = [];
+      snap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      list.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+      setDbBrokers(list);
+    }, (error) => console.warn("Permissão de leitura negada para corretores:", error));
 
     // Site settings real-time bindings
     const unsubHome = onSnapshot(doc(db, "siteSettings", "home"), (snap) => {
@@ -3477,6 +4025,8 @@ export default function App() {
       unsubInstalacoes();
       unsubAcabamentos();
       unsubProximidades();
+      unsubCategoriasImovel();
+      unsubBrokers();
       unsubHome();
       unsubSections();
       unsubCompany();
@@ -3529,6 +4079,218 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showMegaFilter, setShowMegaFilter] = useState(false);
 
+  // New Search Filters States
+  const [bairroFilter, setBairroFilter] = useState<string>('Todos');
+  const [cepFilter, setCepFilter] = useState<string>('');
+  const [bedroomsFilter, setBedroomsFilter] = useState<number | ''>('');
+  const [suitesFilter, setSuitesFilter] = useState<number | ''>('');
+  const [parkingFilter, setParkingFilter] = useState<number | ''>('');
+  const [minAreaFilter, setMinAreaFilter] = useState<number | ''>('');
+  const [maxAreaFilter, setMaxAreaFilter] = useState<number | ''>('');
+  const [cityFilter, setCityFilter] = useState<string>('');
+  const [showAdvancedHome, setShowAdvancedHome] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
+  const [cepBairro, setCepBairro] = useState('');
+  const [cepCidade, setCepCidade] = useState('');
+
+  // Auto-load neighborhoods list from Firestore options or fallbacks
+  const bairrosUnicos = useMemo(() => {
+    const fromDb = optBairros.filter(b => b.ativo !== false).map(b => b.nome || b.label || b.value);
+    if (fromDb.length > 0) {
+      return Array.from(new Set(fromDb)).sort() as string[];
+    }
+    return [
+      "Centro", "Campolim", "Jardim Europa", "Jardim São Carlos", "Jardim Faculdade",
+      "Parque Campolim", "Wanel Ville", "Éden", "Além Ponte", "Vila Haro", "Jardim Simus",
+      "Jardim Pagliato", "Jardim Vergueiro", "Trujillo", "Santa Rosália", "Jardim América",
+      "Jardim Emília", "Vila Jardini", "Brigadeiro Tobias", "Ipanema das Pedras", "Cajuru",
+      "Aparecidinha", "Zona Industrial"
+    ].sort();
+  }, [optBairros]);
+
+  // Dynamic Property Types Loader
+  const tiposImoveisUnicos = useMemo(() => {
+    const fromDb = optTiposImovel.filter(t => t.ativo !== false).map(t => t.nome || t.label || t.value);
+    if (fromDb.length > 0) {
+      return Array.from(new Set(fromDb)).sort() as string[];
+    }
+    return ["Casa", "Apartamento", "Terreno", "Sobrado", "Comercial", "Chácara"];
+  }, [optTiposImovel]);
+
+  // Handle CEP Changes with ViaCEP integration
+  const handleCepChange = async (val: string) => {
+    const raw = val.replace(/\D/g, '');
+    let formatted = raw;
+    if (raw.length > 5) {
+      formatted = `${raw.slice(0, 5)}-${raw.slice(5, 8)}`;
+    }
+    setCepFilter(formatted);
+
+    if (raw.length === 8) {
+      setCepLoading(true);
+      try {
+        const response = await fetch(`https://viacep.com.br/ws/${raw}/json/`);
+        const data = await response.json();
+        if (data && !data.erro) {
+          setCepBairro(data.bairro || '');
+          setCepCidade(data.localidade || '');
+          
+          if (data.bairro) {
+            const foundBairro = bairrosUnicos.find(b => normalizarTexto(b) === normalizarTexto(data.bairro));
+            if (foundBairro) {
+              setBairroFilter(foundBairro);
+            } else {
+              setBairroFilter(data.bairro);
+            }
+          }
+          if (data.localidade) {
+            setCityFilter(data.localidade);
+          }
+        }
+      } catch (err) {
+        console.warn("ViaCEP error:", err);
+      } finally {
+        setCepLoading(false);
+      }
+    } else {
+      setCepBairro('');
+      setCepCidade('');
+    }
+  };
+
+  // Perform search redirects & parameters handling
+  const handlePerformSearch = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    navigateWithFilters();
+  };
+
+  const navigateWithFilters = (overrides: any = {}) => {
+    const params = new URLSearchParams();
+    
+    const b = overrides.busca !== undefined ? overrides.busca : searchTerm;
+    const br = overrides.bairro !== undefined ? overrides.bairro : bairroFilter;
+    const f = overrides.finalidade !== undefined ? overrides.finalidade : purposeFilter;
+    const cat = overrides.categoria !== undefined ? overrides.categoria : categoryFilter;
+    const t = overrides.tipo !== undefined ? overrides.tipo : typeFilter;
+    const mn = overrides.min !== undefined ? overrides.min : minPrice;
+    const mx = overrides.max !== undefined ? overrides.max : maxPrice;
+    const cp = overrides.cep !== undefined ? overrides.cep : cepFilter;
+    const q = overrides.quartos !== undefined ? overrides.quartos : bedroomsFilter;
+    const s = overrides.suites !== undefined ? overrides.suites : suitesFilter;
+    const vg = overrides.vagas !== undefined ? overrides.vagas : parkingFilter;
+    const am = overrides.areaMin !== undefined ? overrides.areaMin : minAreaFilter;
+    const ax = overrides.areaMax !== undefined ? overrides.areaMax : maxAreaFilter;
+
+    if (b) params.set("busca", b);
+    if (br && br !== "Todos") params.set("bairro", br);
+    if (f && f !== "Todas") params.set("finalidade", f);
+    if (cat && cat !== "Todas") params.set("categoria", cat);
+    if (t && t !== "Todas") params.set("tipo", t);
+    if (mn !== "") params.set("min", String(mn));
+    if (mx !== "") params.set("max", String(mx));
+    if (cp) params.set("cep", cp);
+    if (q !== "") params.set("quartos", String(q));
+    if (s !== "") params.set("suites", String(s));
+    if (vg !== "") params.set("vagas", String(vg));
+    if (am !== "") params.set("areaMin", String(am));
+    if (ax !== "") params.set("areaMax", String(ax));
+
+    const paramStr = params.toString();
+    const targetPath = `/propriedades${paramStr ? "?" + paramStr : ""}`;
+    navigateTo(targetPath);
+  };
+
+  const handleChipClick = (chip: string) => {
+    if (chip === 'Casas') {
+      setTypeFilter('Casa');
+      setCategoryFilter('Residencial');
+      setTimeout(() => navigateWithFilters({ tipo: 'Casa', categoria: 'Residencial' }), 50);
+    } else if (chip === 'Apartamentos') {
+      setTypeFilter('Apartamento');
+      setCategoryFilter('Residencial');
+      setTimeout(() => navigateWithFilters({ tipo: 'Apartamento', categoria: 'Residencial' }), 50);
+    } else if (chip === 'Terrenos') {
+      setTypeFilter('Terreno');
+      setTimeout(() => navigateWithFilters({ tipo: 'Terreno' }), 50);
+    } else if (chip === 'Comercial') {
+      setCategoryFilter('Comercial');
+      setTimeout(() => navigateWithFilters({ categoria: 'Comercial' }), 50);
+    } else if (chip === 'Alto padrão') {
+      setMinPrice(1000000);
+      setMinPriceDisplay(formatCurrency(1000000));
+      setTimeout(() => navigateWithFilters({ min: '1000000' }), 50);
+    } else if (chip === '2 quartos') {
+      setBedroomsFilter(2);
+      setTimeout(() => navigateWithFilters({ quartos: '2' }), 50);
+    } else if (chip === '3 quartos') {
+      setBedroomsFilter(3);
+      setTimeout(() => navigateWithFilters({ quartos: '3' }), 50);
+    } else if (chip === 'Com piscina') {
+      setSearchTerm('piscina');
+      setTimeout(() => navigateWithFilters({ busca: 'piscina' }), 50);
+    } else if (chip === 'Condomínio fechado') {
+      setSearchTerm('condomínio');
+      setTimeout(() => navigateWithFilters({ busca: 'condomínio' }), 50);
+    } else if (chip === 'Campolim') {
+      setBairroFilter('Campolim');
+      setTimeout(() => navigateWithFilters({ bairro: 'Campolim' }), 50);
+    } else if (chip === 'Centro') {
+      setBairroFilter('Centro');
+      setTimeout(() => navigateWithFilters({ bairro: 'Centro' }), 50);
+    } else if (chip === 'Até R$ 500 mil') {
+      setPurposeFilter('Venda');
+      setMaxPrice(500000);
+      setMaxPriceDisplay(formatCurrency(500000));
+      setTimeout(() => navigateWithFilters({ finalidade: 'Venda', max: '500000' }), 50);
+    } else if (chip === 'Para alugar') {
+      setPurposeFilter('Locação');
+      setTimeout(() => navigateWithFilters({ finalidade: 'Locação' }), 50);
+    } else if (chip === 'Para comprar') {
+      setPurposeFilter('Venda');
+      setTimeout(() => navigateWithFilters({ finalidade: 'Venda' }), 50);
+    }
+  };
+
+  // Synchronize URL query parameters with active states
+  useEffect(() => {
+    if (currentPath === "/propriedades") {
+      const params = new URLSearchParams(window.location.search);
+      const busca = params.get("busca") || "";
+      const bairro = params.get("bairro") || "";
+      const finalidade = params.get("finalidade") || "";
+      const min = params.get("min") || "";
+      const max = params.get("max") || "";
+      const cep = params.get("cep") || "";
+      const categoria = params.get("categoria") || "";
+      const tipo = params.get("tipo") || "";
+      const quartos = params.get("quartos") || "";
+      const suites = params.get("suites") || "";
+      const vagas = params.get("vagas") || "";
+      const areaMin = params.get("areaMin") || "";
+      const areaMax = params.get("areaMax") || "";
+
+      if (busca) setSearchTerm(busca);
+      if (bairro) setBairroFilter(bairro);
+      if (finalidade) setPurposeFilter(finalidade as any);
+      if (min) {
+        setMinPrice(Number(min));
+        setMinPriceDisplay(formatCurrency(Number(min)));
+      }
+      if (max) {
+        setMaxPrice(Number(max));
+        setMaxPriceDisplay(formatCurrency(Number(max)));
+      }
+      if (cep) handleCepChange(cep);
+      if (categoria) setCategoryFilter(categoria as any);
+      if (tipo) setTypeFilter(tipo);
+      if (quartos) setBedroomsFilter(Number(quartos));
+      if (suites) setSuitesFilter(Number(suites));
+      if (vagas) setParkingFilter(Number(vagas));
+      if (areaMin) setMinAreaFilter(Number(areaMin));
+      if (areaMax) setMaxAreaFilter(Number(areaMax));
+    }
+  }, [currentPath]);
+
   // Filter options for the map section specifically
   const filterOptions = useMemo(() => {
     const cities = new Set<string>();
@@ -3565,59 +4327,72 @@ export default function App() {
     ).slice(0, 5);
   }, [searchTerm, properties]);
 
+  const exactCepMatchesExist = useMemo(() => {
+    if (!cepFilter) return false;
+    const cleanFiltroCep = cepFilter.replace(/\D/g, '');
+    if (!cleanFiltroCep) return false;
+    return properties.some(p => String(p.cep || '').replace(/\D/g, '') === cleanFiltroCep);
+  }, [cepFilter, properties]);
+
   const filteredProperties = useMemo(() => {
-    let result = properties.filter(p => {
-      const matchesCategory = categoryFilter === 'Todas' || p.category === categoryFilter;
-      const matchesType = typeFilter === 'Todas' || p.type === typeFilter;
-      const matchesFavorites = !showOnlyFavorites || userFavorites.includes(String(p.id));
-      
-      const propPurpose = p.purpose || p.tipoNegocio || 'Venda';
-      const alugado = p.alugado === true || p.statusLocacao === 'Alugado' || p.gestaoLocacao?.alugado === true;
-      const vendido = p.vendido === true || p.status === 'Vendido' || p.statusVenda === 'Vendido';
+    const filtros = {
+      buscaRapidaTermo: searchTerm,
+      finalidade: purposeFilter,
+      categoria: categoryFilter,
+      tipo: typeFilter,
+      bairro: bairroFilter,
+      cep: cepFilter,
+      exactCepMatchesExist,
+      cepBairro,
+      cepCidade,
+      quartos: bedroomsFilter,
+      suites: suitesFilter,
+      vagas: parkingFilter,
+      areaMin: minAreaFilter,
+      areaMax: maxAreaFilter,
+      valorMin: minPrice,
+      valorMax: maxPrice,
+      showOnlyFavorites,
+      userFavorites
+    };
 
-      if (vendido) return false;
-
-      let matchesPurpose = false;
-      if (purposeFilter === 'Todas') {
-        if (propPurpose === 'Venda') {
-          matchesPurpose = true;
-        } else if (propPurpose === 'Locação') {
-          matchesPurpose = !alugado;
-        } else if (propPurpose === 'Venda e Locação') {
-          matchesPurpose = true;
-        }
-      } else if (purposeFilter === 'Venda') {
-        matchesPurpose = (propPurpose === 'Venda' || propPurpose === 'Venda e Locação');
-      } else if (purposeFilter === 'Locação') {
-        matchesPurpose = (propPurpose === 'Locação' || propPurpose === 'Venda e Locação') && !alugado;
-      }
-      
-      const search = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || 
-                           p.title.toLowerCase().includes(search) ||
-                           p.city.toLowerCase().includes(search) ||
-                           p.neighborhood.toLowerCase().includes(search) ||
-                           (p.condominium && p.condominium.toLowerCase().includes(search));
-      
-      const matchesMin = minPrice === '' || p.priceValue >= minPrice;
-      const matchesMax = maxPrice === '' || p.priceValue <= maxPrice;
-
-      return matchesCategory && matchesType && matchesPurpose && matchesSearch && matchesMin && matchesMax && matchesFavorites;
-    });
+    let result = filtrarImoveis(properties, filtros);
 
     if (sortBy === 'price-asc') {
       result = [...result].sort((a, b) => a.priceValue - b.priceValue);
     }
 
     return result;
-  }, [searchTerm, purposeFilter, categoryFilter, typeFilter, minPrice, maxPrice, sortBy, properties]);
+  }, [
+    searchTerm,
+    purposeFilter,
+    categoryFilter,
+    typeFilter,
+    bairroFilter,
+    cepFilter,
+    exactCepMatchesExist,
+    cepBairro,
+    cepCidade,
+    bedroomsFilter,
+    suitesFilter,
+    parkingFilter,
+    minAreaFilter,
+    maxAreaFilter,
+    minPrice,
+    maxPrice,
+    sortBy,
+    showOnlyFavorites,
+    userFavorites,
+    properties
+  ]);
 
   const addProperty = async (newP: Omit<Property, 'id'>) => {
     try {
-      await addPropertyToInventory(newP);
-      // Removed manual fetch - handled by real-time subscription
+      const res = await addPropertyToInventory(newP);
+      return res; // returns { success: true, id }
     } catch (error) {
       alert("Erro ao adicionar imóvel no banco de dados.");
+      throw error;
     }
   };
 
@@ -3640,13 +4415,15 @@ export default function App() {
     try {
       if (typeof updatedP.id === 'string') {
         const { id, ...data } = updatedP;
-        await updatePropertyInInventory(id, data);
-        // Removed manual fetch - handled by real-time subscription
+        const res = await updatePropertyInInventory(id, data);
+        return { success: true, id };
       } else {
         setProperties(properties.map(p => p.id === updatedP.id ? updatedP : p));
+        return { success: true, id: updatedP.id };
       }
     } catch (error) {
       alert("Erro ao atualizar o imóvel.");
+      throw error;
     }
   };
 
@@ -3726,6 +4503,27 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* --- Property Detail Modal --- */}
+      <AnimatePresence>
+        {viewingProperty && (
+          <PropertyDetailModal 
+            property={viewingProperty} 
+            siteCompany={siteCompany}
+            onSelectPropertyForVisit={(p) => {
+              setViewingProperty(null);
+              setSelectedPropertyForVisit(p);
+              setIsVisitModalOpen(true);
+            }}
+            onClose={() => {
+              setViewingProperty(null);
+              if (window.location.pathname !== "/") {
+                window.history.pushState({}, document.title, "/");
+              }
+            }} 
+          />
+        )}
+      </AnimatePresence>
+
       {/* --- Admin Portal Overlay --- */}
       <AnimatePresence>
         {isAdminOpen && (
@@ -3736,6 +4534,7 @@ export default function App() {
             onAddProperty={addProperty} 
             onUpdateProperty={updateProperty}
             onDeleteProperty={deleteProperty}
+            onViewFichaTecnica={(p) => setViewingProperty(p)}
             onUnblockSlot={async (id) => {
               try {
                 await unblockSlot(id);
@@ -3797,6 +4596,7 @@ export default function App() {
             optInstalacoes={optInstalacoes}
             optAcabamentos={optAcabamentos}
             optProximidades={optProximidades}
+            optCategoriasImovel={optCategoriasImovel}
           />
         )}
       </AnimatePresence>
@@ -3930,7 +4730,13 @@ export default function App() {
         <div className="container mx-auto px-6 flex justify-between items-center">
           <div 
              className="flex items-center space-x-4 group cursor-pointer"
-             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+             onClick={() => {
+               if (currentPath !== "/") {
+                 navigateTo("/");
+               } else {
+                 window.scrollTo({ top: 0, behavior: "smooth" });
+               }
+             }}
           >
             <div className="relative">
               {siteAppearance?.logoUrl ? (
@@ -3964,9 +4770,34 @@ export default function App() {
 
           {/* Desktop Menu */}
           <div className={`hidden md:flex items-center space-x-10 ${isScrolled ? 'text-white/80 font-semibold' : 'text-white/90 font-semibold'}`}>
-            <a href="#" className="hover:text-brand-orange transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-brand-orange hover:after:w-full after:transition-all">Home</a>
-            <a href="#properties" className="hover:text-brand-orange transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-brand-orange hover:after:w-full after:transition-all">Propriedades</a>
-            <a href="#team" className="hover:text-brand-orange transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-brand-orange hover:after:w-full after:transition-all">Corretores</a>
+            <a 
+              href="/" 
+              onClick={(e) => { e.preventDefault(); navigateTo("/"); }}
+              className={`transition-colors relative after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-brand-orange after:transition-all ${currentPath === "/" ? 'text-brand-orange after:w-full' : 'hover:text-brand-orange after:w-0 hover:after:w-full text-white/90'}`}
+            >
+              Home
+            </a>
+            <a 
+              href="/propriedades" 
+              onClick={(e) => { e.preventDefault(); navigateTo("/propriedades"); }}
+              className={`transition-colors relative after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-brand-orange after:transition-all ${currentPath === "/propriedades" ? 'text-brand-orange after:w-full' : 'hover:text-brand-orange after:w-0 hover:after:w-full text-white/90'}`}
+            >
+              Propriedades
+            </a>
+            <a 
+              href="/sobre-nos" 
+              onClick={(e) => { e.preventDefault(); navigateTo("/sobre-nos"); }}
+              className={`transition-colors relative after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-brand-orange after:transition-all ${currentPath === "/sobre-nos" ? 'text-brand-orange after:w-full' : 'hover:text-brand-orange after:w-0 hover:after:w-full text-white/90'}`}
+            >
+              Sobre Nós
+            </a>
+            <a 
+              href="/corretores" 
+              onClick={(e) => { e.preventDefault(); navigateTo("/corretores"); }}
+              className={`transition-colors relative after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-brand-orange after:transition-all ${currentPath === "/corretores" ? 'text-brand-orange after:w-full' : 'hover:text-brand-orange after:w-0 hover:after:w-full text-white/90'}`}
+            >
+              Corretores
+            </a>
             
             {isAuthorized ? (
               <button 
@@ -3979,8 +4810,8 @@ export default function App() {
             ) : (
               <div className="flex items-center space-x-6">
                 <a 
-                  href="#contact" 
-                  onClick={handlePropertyRegistrationClick}
+                  href="/contato" 
+                  onClick={(e) => { e.preventDefault(); handlePropertyRegistrationClick(e); }}
                   className="text-white/60 hover:text-brand-orange font-bold uppercase tracking-widest text-[9px] hover:scale-105 transition-transform flex items-center gap-2"
                 >
                   <Plus size={14} />
@@ -3998,7 +4829,11 @@ export default function App() {
               </div>
             )}
             
-            <a href="#contact" className="btn-primary !px-6 !py-3 shadow-orange-500/20">
+            <a 
+              href="/contato" 
+              onClick={(e) => { e.preventDefault(); navigateTo("/contato"); }}
+              className={`btn-primary !px-6 !py-3 shadow-orange-500/20 ${currentPath === "/contato" ? "bg-brand-orange text-white" : ""}`}
+            >
               Fale Conosco
             </a>
             
@@ -4061,18 +4896,24 @@ export default function App() {
               {/* Navigation Links */}
               <nav className="flex flex-col space-y-6">
                 {[
-                  { label: 'Início', href: '#' },
-                  { label: 'Propriedades', href: '#properties' },
-                  { label: 'Corretores', href: '#team' },
+                  { label: "Home", path: "/" },
+                  { label: "Propriedades", path: "/propriedades" },
+                  { label: "Sobre Nós", path: "/sobre-nos" },
+                  { label: "Corretores", path: "/corretores" },
+                  { label: "Fale Conosco", path: "/contato" }
                 ].map((link, i) => (
                   <motion.a
                     key={link.label}
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.1 + i * 0.1 }}
-                    href={link.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="text-3xl md:text-4xl font-black text-white hover:text-brand-orange transition-all tracking-tighter uppercase leading-none"
+                    href={link.path}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMobileMenuOpen(false);
+                      navigateTo(link.path);
+                    }}
+                    className={`text-3xl md:text-4xl font-black transition-all tracking-tighter uppercase leading-none ${currentPath === link.path ? "text-brand-orange" : "text-white hover:text-brand-orange"}`}
                   >
                     {link.label}
                   </motion.a>
@@ -4256,21 +5097,51 @@ export default function App() {
                     </div>
                   </motion.div>
 
-            {/* Advanced Search Bar - Refined for Mobile */}
+            {/* Advanced Search Bar - Engineered with Premium Polish */}
             <motion.div 
                initial={{ opacity: 0, y: 30 }}
                animate={{ opacity: 1, y: 0 }}
                transition={{ delay: 0.3, duration: 0.8 }}
-               className="bg-black/90 backdrop-blur-3xl p-3 md:p-5 rounded-2xl shadow-[0_40px_100px_rgba(0,0,0,0.6)] flex flex-col items-stretch gap-2.5 md:gap-4 border border-white/10"
+               className="bg-[#0b0c10]/95 backdrop-blur-3xl p-4 md:p-8 rounded-3xl shadow-[0_50px_100px_rgba(0,0,0,0.8)] flex flex-col items-stretch gap-6 border border-white/5 relative z-40"
             >
-              <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 md:gap-4">
-                <div className="flex-1 relative">
-                  <div className="flex items-center px-4 md:px-5 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 py-2 py-3 group focus-within:border-brand-orange transition-all shadow-inner">
-                    <Search className="text-brand-orange mr-2 md:mr-3 shrink-0" size={16} md:size={18} />
+              {/* Purpose Tabs Selector */}
+              <div className="flex border-b border-white/10 pb-4 justify-between items-center flex-wrap gap-4">
+                <div className="flex bg-white/5 p-1 rounded-xl">
+                  {(['Todas', 'Venda', 'Locação'] as const).map((purp) => (
+                    <button
+                      key={purp}
+                      onClick={() => setPurposeFilter(purp)}
+                      className={`px-6 py-2.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
+                        purposeFilter === purp 
+                          ? 'bg-brand-orange text-white shadow-lg' 
+                          : 'text-white/60 hover:text-white'
+                      }`}
+                    >
+                      {purp === 'Todas' ? 'Comprar ou Alugar' : purp === 'Venda' ? 'Comprar' : 'Alugar'}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedHome(!showAdvancedHome)}
+                  className="flex items-center gap-2 text-white/50 hover:text-brand-orange font-bold text-xs uppercase tracking-widest transition-colors"
+                >
+                  <SlidersHorizontal size={14} className="text-brand-orange" />
+                  <span>{showAdvancedHome ? 'Ocultar Filtros Avançados' : 'Filtros Avançados'}</span>
+                </button>
+              </div>
+
+              {/* Main Inputs Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
+                {/* Busca Rápida */}
+                <div className="lg:col-span-4 relative group">
+                  <span className="block text-[8px] font-black uppercase tracking-widest text-brand-orange mb-2 ml-1">Filtro Inteligente</span>
+                  <div className="flex items-center px-4 bg-white/5 rounded-xl border border-white/10 py-3.5 focus-within:border-brand-orange transition-all">
+                    <Search className="text-brand-orange mr-3 shrink-0" size={18} />
                     <input 
                       type="text" 
-                      placeholder="Localização, bairro ou condomínio..." 
-                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-xs md:text-base"
+                      placeholder="Ex: casa 2 quartos, apto no Campolim..." 
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-sm"
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -4288,185 +5159,321 @@ export default function App() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 10 }}
-                        className="absolute top-full left-0 w-full mt-3 bg-black/95 backdrop-blur-2xl rounded-[1.5rem] shadow-2xl border border-white/10 z-50 overflow-hidden"
+                        className="absolute top-full left-0 w-full mt-3 bg-[#0a0b0d]/98 backdrop-blur-2xl rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] border border-white/10 z-50 overflow-hidden"
                       >
                         {suggestions.map((s, i) => (
                           <button
                             key={i}
-                            className="w-full text-left px-7 py-4 hover:bg-brand-orange/10 transition-colors flex items-center space-x-4 group border-b border-white/5 last:border-0"
+                            type="button"
+                            className="w-full text-left px-5 py-3 hover:bg-brand-orange/15 transition-colors flex items-center space-x-3 group border-b border-white/5 last:border-0"
                             onClick={() => {
                               setSearchTerm(s);
                               setShowSuggestions(false);
                             }}
                           >
-                            <MapPin size={18} className="text-white/20 group-hover:text-brand-orange transition-colors" />
-                            <span className="text-white/60 group-hover:text-white font-bold text-sm md:text-base">{s}</span>
+                            <MapPin size={16} className="text-white/30 group-hover:text-brand-orange transition-colors" />
+                            <span className="text-white/70 group-hover:text-white font-bold text-sm">{s}</span>
                           </button>
                         ))}
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </div>
-                
-                <div className="md:w-64 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 px-5 py-3 md:py-3.5 relative group focus-within:border-brand-orange transition-all shadow-inner">
-                  <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Finalidade</span>
-                  <select 
-                    className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-[10px] md:text-xs tracking-widest"
-                    value={purposeFilter}
-                    onChange={(e) => {
-                      setPurposeFilter(e.target.value as any);
-                    }}
-                  >
-                    <option value="Todas" className="bg-brand-dark">Venda & Locação (Todas)</option>
-                    <option value="Venda" className="bg-brand-dark">Venda</option>
-                    <option value="Locação" className="bg-brand-dark">Locação</option>
-                  </select>
-                </div>
 
-                <div className="md:w-64 bg-white/5 rounded-xl md:rounded-2xl border border-white/10 px-5 py-3 md:py-3.5 relative group focus-within:border-brand-orange transition-all shadow-inner">
-                  <span className="absolute -top-3 left-4 bg-black px-2 text-[8px] font-black tracking-widest text-brand-orange uppercase">Categoria</span>
-                  <select 
-                    className="w-full bg-transparent outline-none text-white font-black cursor-pointer appearance-none uppercase text-[10px] md:text-xs tracking-widest"
-                    value={categoryFilter}
-                    onChange={(e) => {
-                      setCategoryFilter(e.target.value as any);
-                      setTypeFilter('Todas');
-                    }}
-                  >
-                    <option value="Todas" className="bg-brand-dark">Todas Categorias</option>
-                    <option value="Residencial" className="bg-brand-dark">Residencial</option>
-                    <option value="Comercial" className="bg-brand-dark">Comercial</option>
-                    <option value="Rural" className="bg-brand-dark">Rural</option>
-                  </select>
-                </div>
-
-                <a href="#properties" className="btn-primary !px-10 !py-3 md:!py-3.5 shadow-orange-500/20 text-center whitespace-nowrap flex items-center justify-center gap-3 w-full md:w-auto">
-                  <Search size={20} />
-                  <span className="text-sm md:text-base">BUSCAR IMÓVEIS</span>
-                </a>
-              </div>
-
-              <div className="flex flex-col gap-4 pt-4 border-t border-white/5">
-                <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-6 w-full">
-                  <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
-                    <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.3em] whitespace-nowrap">Faixa de Investimento</span>
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <div className="flex-1 sm:w-36 relative group">
-                        <input 
-                          type="text" 
-                          placeholder="Mínimo (ex: 500k)"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
-                          value={minPriceDisplay}
-                          onChange={(e) => setMinPriceDisplay(e.target.value)}
-                          onBlur={() => {
-                            const val = parsePriceInput(minPriceDisplay);
-                            setMinPrice(val);
-                            if (val !== '') setMinPriceDisplay(formatCurrency(val));
-                          }}
-                        />
-                      </div>
-                      <div className="w-4 h-[1px] bg-white/20" />
-                      <div className="flex-1 sm:w-36 relative group">
-                        <input 
-                          type="text" 
-                          placeholder="Máximo (ex: 2M)"
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
-                          value={maxPriceDisplay}
-                          onChange={(e) => setMaxPriceDisplay(e.target.value)}
-                          onBlur={() => {
-                            const val = parsePriceInput(maxPriceDisplay);
-                            setMaxPrice(val);
-                            if (val !== '') setMaxPriceDisplay(formatCurrency(val));
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex-1 w-full flex flex-col gap-3">
-                    <div className="flex justify-between items-center px-1">
-                      <span className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em]">Arraste para definir teto de preço</span>
-                      <span className="text-[11px] font-black text-brand-orange font-mono">
-                        {maxPrice === '' ? 'SEM LIMITE' : formatCurrency(maxPrice)}
-                      </span>
-                    </div>
-                    <div className="relative h-6 flex items-center">
-                      <input 
-                        type="range"
-                        min="0"
-                        max="10000000"
-                        step="100000"
-                        value={maxPrice === '' ? 10000000 : maxPrice}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          const finalVal = val === 10000000 ? '' : val;
-                          setMaxPrice(finalVal);
-                          setMaxPriceDisplay(finalVal === '' ? '' : formatCurrency(finalVal));
-                        }}
-                        className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-brand-orange hover:accent-orange-500 transition-all"
-                      />
-                    </div>
+                {/* Bairro Dropdown */}
+                <div className="lg:col-span-3 relative">
+                  <span className="block text-[8px] font-black uppercase tracking-widest text-brand-orange mb-2 ml-1">Bairro</span>
+                  <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-3.5 group focus-within:border-brand-orange transition-all">
+                    <select 
+                      className="w-full bg-transparent outline-none text-white font-bold cursor-pointer appearance-none text-sm"
+                      value={bairroFilter}
+                      onChange={(e) => setBairroFilter(e.target.value)}
+                    >
+                      <option value="Todos" className="bg-brand-dark text-white">Todos os Bairros</option>
+                      {bairrosUnicos.map((b) => (
+                        <option key={b} value={b} className="bg-brand-dark text-white">{b}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
-                {/* Applied Filter Tags */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-[9px] font-black text-white/20 uppercase tracking-widest mr-2">Filtros Ativos:</span>
-                  
-                  {searchTerm && (
-                    <div className="flex items-center gap-2 bg-brand-orange/10 border border-brand-orange/30 px-3 py-1.5 rounded-full transition-all hover:bg-brand-orange/20">
-                      <Search size={10} className="text-brand-orange" />
-                      <span className="text-[9px] font-black text-brand-orange uppercase">{searchTerm}</span>
-                      <button onClick={() => setSearchTerm('')} className="text-brand-orange/50 hover:text-white"><X size={10} /></button>
-                    </div>
-                  )}
+                {/* Categoria */}
+                <div className="lg:col-span-2 relative">
+                  <span className="block text-[8px] font-black uppercase tracking-widest text-brand-orange mb-2 ml-1">Categoria</span>
+                  <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-3.5 group focus-within:border-brand-orange transition-all">
+                    <select 
+                      className="w-full bg-transparent outline-none text-white font-bold cursor-pointer appearance-none text-sm"
+                      value={categoryFilter}
+                      onChange={(e) => {
+                        setCategoryFilter(e.target.value as any);
+                        setTypeFilter('Todas');
+                      }}
+                    >
+                      <option value="Todas" className="bg-brand-dark text-white">Todas</option>
+                      <option value="Residencial" className="bg-brand-dark text-white">Residencial</option>
+                      <option value="Comercial" className="bg-brand-dark text-white">Comercial</option>
+                      <option value="Rural" className="bg-brand-dark text-white">Rural</option>
+                    </select>
+                  </div>
+                </div>
 
-                  {(minPrice !== '' || maxPrice !== '') && (
-                    <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
-                      <DollarSign size={10} className="text-white/40" />
-                      <span className="text-[9px] font-black text-white/50 uppercase">
-                        {minPrice !== '' ? formatCurrency(minPrice) : 'R$ 0'} - {maxPrice !== '' ? formatCurrency(maxPrice) : '∞'}
-                      </span>
-                      <button 
-                        onClick={() => {
-                          setMinPrice(''); setMaxPrice('');
-                          setMinPriceDisplay(''); setMaxPriceDisplay('');
-                        }} 
-                        className="text-white/20 hover:text-white"
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  )}
+                {/* CEP Input */}
+                <div className="lg:col-span-2 relative">
+                  <span className="block text-[8px] font-black uppercase tracking-widest text-brand-orange mb-2 ml-1">
+                    CEP {cepLoading && <span className="text-[7px] text-white/40 animate-pulse">(buscando...)</span>}
+                  </span>
+                  <div className="flex items-center px-4 bg-white/5 rounded-xl border border-white/10 py-3.5 focus-within:border-brand-orange transition-all">
+                    <input 
+                      type="text" 
+                      placeholder="00000-000" 
+                      maxLength={9}
+                      className="w-full outline-none bg-transparent text-white font-bold placeholder:text-white/20 text-sm"
+                      value={cepFilter}
+                      onChange={(e) => handleCepChange(e.target.value)}
+                    />
+                  </div>
+                </div>
 
-                  {categoryFilter !== 'Todas' && (
-                    <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
-                      <Home size={10} className="text-white/40" />
-                      <span className="text-[9px] font-black text-white/50 uppercase">{categoryFilter}</span>
-                      <button onClick={() => setCategoryFilter('Todas')} className="text-white/20 hover:text-white"><X size={10} /></button>
-                    </div>
-                  )}
-
-                  {!searchTerm && minPrice === '' && maxPrice === '' && categoryFilter === 'Todas' && (
-                    <span className="text-[9px] font-bold text-white/10 uppercase italic">Nenhum filtro aplicado</span>
-                  )}
-
+                {/* Submit Action Button */}
+                <div className="lg:col-span-1">
                   <button 
-                    onClick={() => {
-                      setSearchTerm('');
-                      setCategoryFilter('Todas');
-                      setMinPrice('');
-                      setMaxPrice('');
-                      setMinPriceDisplay('');
-                      setMaxPriceDisplay('');
-                    }}
-                    className="ml-auto text-[8px] font-black text-white/20 hover:text-brand-orange uppercase tracking-widest transition-colors underline underline-offset-4"
+                    onClick={() => handlePerformSearch()}
+                    className="btn-primary !px-5 !py-4 shadow-orange-500/20 text-center whitespace-nowrap flex items-center justify-center w-full rounded-xl"
                   >
-                    Limpar Tudo
+                    <Search size={22} />
                   </button>
                 </div>
               </div>
+
+              {/* Advanced Collapsible Accordion Block */}
+              <AnimatePresence>
+                {showAdvancedHome && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.4 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="pt-6 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                      {/* Dormitórios */}
+                      <div className="relative">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-white/40 mb-2">Mínimo Dormitórios</span>
+                        <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-3 group focus-within:border-brand-orange transition-all">
+                          <select 
+                            className="w-full bg-transparent outline-none text-white font-bold cursor-pointer appearance-none text-xs"
+                            value={bedroomsFilter}
+                            onChange={(e) => setBedroomsFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                          >
+                            <option value="" className="bg-brand-dark">Tanto faz</option>
+                            <option value="1" className="bg-brand-dark">1+ Quarto</option>
+                            <option value="2" className="bg-brand-dark">2+ Quartos</option>
+                            <option value="3" className="bg-brand-dark">3+ Quartos</option>
+                            <option value="4" className="bg-brand-dark">4+ Quartos</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Suítes */}
+                      <div className="relative">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-white/40 mb-2">Mínimo Suítes</span>
+                        <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-3 group focus-within:border-brand-orange transition-all">
+                          <select 
+                            className="w-full bg-transparent outline-none text-white font-bold cursor-pointer appearance-none text-xs"
+                            value={suitesFilter}
+                            onChange={(e) => setSuitesFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                          >
+                            <option value="" className="bg-brand-dark">Tanto faz</option>
+                            <option value="1" className="bg-brand-dark">1+ Suíte</option>
+                            <option value="2" className="bg-brand-dark">2+ Suítes</option>
+                            <option value="3" className="bg-brand-dark">3+ Suítes</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Vagas de Garagem */}
+                      <div className="relative">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-white/40 mb-2">Mínimo Garagem</span>
+                        <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-3 group focus-within:border-brand-orange transition-all">
+                          <select 
+                            className="w-full bg-transparent outline-none text-white font-bold cursor-pointer appearance-none text-xs"
+                            value={parkingFilter}
+                            onChange={(e) => setParkingFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                          >
+                            <option value="" className="bg-brand-dark">Tanto faz</option>
+                            <option value="1" className="bg-brand-dark">1+ Vaga</option>
+                            <option value="2" className="bg-brand-dark">2+ Vagas</option>
+                            <option value="3" className="bg-brand-dark">3+ Vagas</option>
+                            <option value="4" className="bg-brand-dark">4+ Vagas</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Área útil slider or numeric targets */}
+                      <div className="relative">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-white/40 mb-2">Área Mínima (m²)</span>
+                        <div className="bg-white/5 rounded-xl border border-white/10 px-4 py-2.5 focus-within:border-brand-orange transition-all">
+                          <input 
+                            type="number" 
+                            placeholder="Ex: 80" 
+                            className="w-full outline-none bg-transparent text-white font-bold text-xs"
+                            value={minAreaFilter}
+                            onChange={(e) => setMinAreaFilter(e.target.value === '' ? '' : Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Faixa de Investimento / Aluguel section */}
+                    <div className="mt-8 pt-6 border-t border-white/5 flex flex-col xl:flex-row items-stretch xl:items-center gap-6">
+                      <div className="flex-1 space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] font-black text-white/30 uppercase tracking-widest">
+                            {purposeFilter === 'Locação' ? 'Faixa de Aluguel' : 'Faixa de Investimento'}
+                          </span>
+                          <span className="text-xs font-black text-brand-orange font-mono">
+                            {minPrice === '' && maxPrice === '' ? 'QUALQUER PREÇO' : `${minPrice ? formatCurrency(minPrice) : 'R$ 0'} - ${maxPrice ? formatCurrency(maxPrice) : 'ILIMITADO'}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="text" 
+                            placeholder="Mínimo (ex: 500k)"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
+                            value={minPriceDisplay}
+                            onChange={(e) => setMinPriceDisplay(e.target.value)}
+                            onBlur={() => {
+                              const val = parsePriceInput(minPriceDisplay);
+                              setMinPrice(val);
+                              if (val !== '') setMinPriceDisplay(formatCurrency(val));
+                            }}
+                          />
+                          <span className="text-white/20 text-xs">até</span>
+                          <input 
+                            type="text" 
+                            placeholder="Máximo (ex: 2M)"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-brand-orange transition-all placeholder:text-white/10"
+                            value={maxPriceDisplay}
+                            onChange={(e) => setMaxPriceDisplay(e.target.value)}
+                            onBlur={() => {
+                              const val = parsePriceInput(maxPriceDisplay);
+                              setMaxPrice(val);
+                              if (val !== '') setMaxPriceDisplay(formatCurrency(val));
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Fast price indicators */}
+                      <div className="xl:w-1/2 flex flex-col justify-end">
+                        <span className="block text-[8px] font-black uppercase tracking-widest text-[#9ea0a5]/60 mb-2 ml-1">Seleção Rápida de Valores</span>
+                        <div className="flex flex-wrap gap-2">
+                          {purposeFilter === 'Locação' ? (
+                            // Locação values
+                            <>
+                              <button
+                                onClick={() => { setMinPrice(''); setMaxPrice(1500); setMinPriceDisplay(''); setMaxPriceDisplay(formatCurrency(1500)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                Até R$ 1.500
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(1500); setMaxPrice(3000); setMinPriceDisplay(formatCurrency(1500)); setMaxPriceDisplay(formatCurrency(3000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 1.500 - 3.000
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(3000); setMaxPrice(5000); setMinPriceDisplay(formatCurrency(3000)); setMaxPriceDisplay(formatCurrency(5000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 3.000 - 5.000
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(5000); setMaxPrice(8000); setMinPriceDisplay(formatCurrency(5000)); setMaxPriceDisplay(formatCurrency(8000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 5.000 - 8.000
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(8000); setMaxPrice(''); setMinPriceDisplay(formatCurrency(8000)); setMaxPriceDisplay('SEM LIMITE'); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                Acima de R$ 8.000
+                              </button>
+                            </>
+                          ) : (
+                            // Venda / Outros values
+                            <>
+                              <button
+                                onClick={() => { setMinPrice(''); setMaxPrice(300000); setMinPriceDisplay(''); setMaxPriceDisplay(formatCurrency(300000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                Até R$ 300 mil
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(300000); setMaxPrice(500000); setMinPriceDisplay(formatCurrency(300000)); setMaxPriceDisplay(formatCurrency(500000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 300k - 500k
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(500000); setMaxPrice(800000); setMinPriceDisplay(formatCurrency(500000)); setMaxPriceDisplay(formatCurrency(800000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 500k - 800k
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(800000); setMaxPrice(1000000); setMinPriceDisplay(formatCurrency(800000)); setMaxPriceDisplay(formatCurrency(1000000)); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                R$ 800k - 1M
+                              </button>
+                              <button
+                                onClick={() => { setMinPrice(1000000); setMaxPrice(''); setMinPriceDisplay(formatCurrency(1000000)); setMaxPriceDisplay('SEM LIMITE'); }}
+                                className="px-3 py-2 bg-white/5 hover:bg-brand-orange/30 text-white rounded-lg text-[10px] font-bold transition-all border border-white/5"
+                              >
+                                Acima de 1M
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
+
+            {/* Quick Search Horizontal Chip Filters */}
+            <div className="mt-6 flex flex-wrap items-center justify-center lg:justify-start gap-2.5 max-w-4xl mx-auto lg:mx-0 relative z-30">
+              <span className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em] mr-1">Atalhos rápidos:</span>
+              {[
+                'Casas',
+                'Apartamentos',
+                'Terrenos',
+                'Comercial',
+                'Alto padrão',
+                '2 quartos',
+                '3 quartos',
+                'Com piscina',
+                'Condomínio fechado',
+                'Campolim',
+                'Centro',
+                'Até R$ 500 mil',
+                'Para alugar',
+                'Para comprar'
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => handleChipClick(chip)}
+                  className="px-3.5 py-1.5 bg-white/[0.04] hover:bg-brand-orange hover:text-white border border-white/[0.08] hover:border-brand-orange text-white/70 rounded-full font-bold text-xs transition-all tracking-tight active:scale-95"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
 
             {/* Social Proof */}
             <motion.div 
@@ -4493,180 +5500,479 @@ export default function App() {
         </div>
       </section>
 
-      {/* --- Featured Highlights --- */}
-      <section className="py-16 md:py-32 bg-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/2 h-full bg-slate-50/50 -skew-x-12 translate-x-20" />
-        <div className="container mx-auto px-6 relative z-10">
-          <div className="grid md:grid-cols-2 gap-16 items-center">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              className="relative group p-4 border border-brand-orange/10 rounded-3xl md:rounded-[3rem] -rotate-1 group-hover:rotate-0 transition-all duration-700"
-            >
-                <div className="relative rounded-3xl md:rounded-[2.5rem] overflow-hidden aspect-video shadow-2xl">
-                <img 
-                  src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?q=80&w=1974&auto=format&fit=crop" 
-                  alt="Highlight House"
-                  className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 bg-black p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-2xl z-20 flex flex-col items-center">
-                   <span className="text-brand-orange text-2xl md:text-4xl font-black mb-0.5 md:mb-1 leading-none tracking-tighter">15</span>
-                   <span className="text-white/40 text-[6px] md:text-[7px] font-black tracking-[0.2em] md:tracking-[0.3em] uppercase">Anos de Histórias</span>
-                </div>
+      {/* --- Página Sobre Nós --- */}
+      {currentPath === "/sobre-nos" && (
+        <>
+          {/* About Us Header Banner */}
+          <div className="bg-black text-white pt-40 pb-20 md:pb-32 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-96 h-96 bg-brand-orange/15 rounded-full blur-[150px] -ml-40 -mt-40" />
+            <div className="container mx-auto px-6 relative z-10 text-center">
+              <div className="flex items-center justify-center space-x-4 mb-4">
+                <div className="w-12 h-[2px] bg-brand-orange" />
+                <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Exclusividade RB</span>
+                <div className="w-12 h-[2px] bg-brand-orange" />
               </div>
-            </motion.div>
-            
-            <div className="space-y-6 md:space-y-10">
-              <div className="flex items-center space-x-4">
-                <div className="w-10 h-[2px] bg-brand-orange" />
-                <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Lifestyle Sorocaba</span>
-              </div>
-              <h2 className="text-3xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
-              <p className="text-slate-500 text-base md:text-lg leading-relaxed font-medium">
-                Nossa missão transcende a simples venda de imóveis. Entregamos curadoria, exclusividade e segurança jurídica para que sua única preocupação seja aproveitar o novo lar.
+              <h1 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6">
+                Sobre <span className="text-brand-orange">Nós</span>
+              </h1>
+              <p className="text-white/60 text-lg md:text-2xl max-w-2xl mx-auto font-medium">
+                A renomada imobiliária boutique de alto padrão em Sorocaba. Curadoria VIP, transparência ética e atendimento exclusivo.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 pt-2 md:pt-4">
-                <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
-                    <Eye size={20} md:size={24} />
-                  </div>
-                  <h5 className="font-black text-lg md:text-xl tracking-tight">CURADORIA ELITE</h5>
-                  <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Imóveis selecionados um a um por nossa diretoria estratégica.</p>
-                </div>
-                <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
-                  <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
-                    <LayoutDashboard size={20} md:size={24} />
-                  </div>
-                  <h5 className="font-black text-lg md:text-xl tracking-tight">EXPERIÊNCIA VIP</h5>
-                  <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Atendimento personalizado com total discrição e foco absoluto.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsHistoryOpen(true)}
-                className="btn-secondary group !px-8 md:!px-10 !py-4 md:!py-5 uppercase text-[10px] md:text-xs tracking-widest font-black flex items-center gap-2 md:gap-4 mx-auto md:mx-0 shadow-lg"
-              >
-                Nossa História 
-                <ChevronRight className="group-hover:translate-x-1 transition-transform" size={16} md:size={18} />
-              </button>
             </div>
           </div>
-        </div>
-      </section>
 
-      {/* --- Property Listing --- */}
-      <section id="properties" className="py-32 md:py-48 bg-[#f9f9f9]">
-        <div className="container mx-auto px-6">
-          <div className="flex flex-col md:flex-row justify-between items-end mb-16 md:mb-24 gap-10">
-            <motion.div 
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="max-w-2xl text-center md:text-left"
-            >
-              <div className="flex items-center justify-center md:justify-start space-x-4 mb-6">
-                <div className="w-12 h-[2px] bg-brand-orange" />
-                <span className="text-brand-orange font-black uppercase tracking-[0.5em] text-[10px]">Curadoria Exclusiva</span>
-              </div>
-              <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
-                VITRINE <br />
-                <span className="text-transparent" style={{ WebkitTextStroke: '2px #1e293b' }}>EXTRAORDINÁRIA</span>
-              </h2>
-              <p className="text-slate-500 font-medium md:text-xl max-w-lg leading-relaxed">
-                Cada m² foi selecionado para superar as expectativas mais exigentes do mercado de alto padrão em Sorocaba.
-              </p>
-            </motion.div>
-            
-            <motion.div 
-              initial={{ opacity: 0, x: 30 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              className="flex flex-wrap justify-center items-center gap-4 md:gap-6"
-            >
-              {currentUser && (
-                <button 
-                  onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
-                  className={`flex items-center space-x-3 px-8 md:px-10 py-4 md:py-6 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl border-2 ${
-                    showOnlyFavorites 
-                      ? 'bg-brand-orange text-white border-brand-orange shadow-orange-500/20' 
-                      : 'bg-white text-brand-dark border-transparent hover:border-brand-orange/20'
-                  }`}
+          {/* --- Featured Highlights --- */}
+          <section className="py-16 md:py-32 bg-white relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-1/2 h-full bg-slate-50/50 -skew-x-12 translate-x-20" />
+            <div className="container mx-auto px-6 relative z-10">
+              <div className="grid md:grid-cols-2 gap-16 items-center">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  viewport={{ once: true }}
+                  className="relative group p-4 border border-brand-orange/10 rounded-3xl md:rounded-[3rem] -rotate-1 group-hover:rotate-0 transition-all duration-700"
                 >
-                  <Star size={16} fill={showOnlyFavorites ? "currentColor" : "none"} />
-                  <span>Favoritos ({userFavorites.length})</span>
-                </button>
-              )}
-              <button 
-                onClick={() => setShowMegaFilter(true)}
-                className="group relative px-8 md:px-12 py-4 md:py-6 rounded-full bg-brand-dark text-white text-[10px] font-black uppercase tracking-widest overflow-hidden transition-all shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:shadow-orange-500/20"
-              >
-                <span className="relative z-10">Filtros Avançados</span>
-                <div className="absolute inset-0 bg-brand-orange translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
-              </button>
-            </motion.div>
-          </div>
+                  <div className="relative rounded-3xl md:rounded-[2.5rem] overflow-hidden aspect-video shadow-2xl">
+                    <img 
+                      src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?q=80&w=1974&auto=format&fit=crop" 
+                      alt="Highlight House"
+                      className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 bg-black p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-2xl z-20 flex flex-col items-center">
+                       <span className="text-brand-orange text-2xl md:text-4xl font-black mb-0.5 md:mb-1 leading-none tracking-tighter">15</span>
+                       <span className="text-white/40 text-[6px] md:text-[7px] font-black tracking-[0.2em] md:tracking-[0.3em] uppercase">Anos de Histórias</span>
+                    </div>
+                  </div>
+                </motion.div>
+                
+                <div className="space-y-6 md:space-y-10">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-[2px] bg-brand-orange" />
+                    <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Lifestyle Sorocaba</span>
+                  </div>
+                  <h2 className="text-3xl md:text-7xl font-black leading-[1.1] md:leading-[0.9] tracking-tighter uppercase">Excelência em cada <br className="hidden md:block" /> <span className="text-brand-orange">DETALHE.</span></h2>
+                  <p className="text-slate-500 text-base md:text-lg leading-relaxed font-medium">
+                    Nossa missão transcende a simples venda de imóveis. Entregamos curadoria, exclusividade e segurança jurídica para que sua única preocupação seja aproveitar o novo lar.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 pt-2 md:pt-4">
+                    <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
+                        <Eye size={20} md:size={24} />
+                      </div>
+                      <h5 className="font-black text-lg md:text-xl tracking-tight">CURADORIA ELITE</h5>
+                      <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Imóveis selecionados um a um por nossa diretoria estratégica.</p>
+                    </div>
+                    <div className="space-y-2 md:space-y-3 group cursor-pointer p-4 md:p-6 rounded-2xl md:rounded-3xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-black flex items-center justify-center rounded-xl md:rounded-2xl text-brand-orange group-hover:bg-brand-orange group-hover:text-white transition-all shadow-lg">
+                        <LayoutDashboard size={20} md:size={24} />
+                      </div>
+                      <h5 className="font-black text-lg md:text-xl tracking-tight">EXPERIÊNCIA VIP</h5>
+                      <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">Atendimento personalizado com total discrição e foco absoluto.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setIsHistoryOpen(true)}
+                    className="btn-secondary group !px-8 md:!px-10 !py-4 md:!py-5 uppercase text-[10px] md:text-xs tracking-widest font-black flex items-center gap-2 md:gap-4 mx-auto md:mx-0 shadow-lg"
+                  >
+                    Nossa História 
+                    <ChevronRight className="group-hover:translate-x-1 transition-transform" size={16} md:size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12 md:gap-16">
-            {isLoading ? (
-                <div className="col-span-full py-20 md:py-32 flex flex-col items-center justify-center text-center space-y-6">
-                <div className="relative">
-                  <div className="w-20 h-20 border-4 border-slate-100 border-t-brand-orange rounded-full animate-spin" />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-10 h-10 bg-brand-orange/10 rounded-full animate-pulse" />
+          {/* Inline Detailed Legacy Story */}
+          <section className="py-24 bg-slate-50 relative overflow-hidden border-t border-slate-100">
+            <div className="container mx-auto px-6">
+              <div className="grid md:grid-cols-2 gap-16 items-center max-w-6xl mx-auto">
+                <div className="space-y-8">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-[2px] bg-brand-orange" />
+                    <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Nosso Legado</span>
+                  </div>
+                  <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-none">
+                    Nossa <span className="text-brand-orange">História</span>
+                  </h2>
+                  <div className="space-y-6 text-slate-600 leading-relaxed text-base md:text-lg">
+                    <p className="font-bold text-slate-900 border-l-4 border-brand-orange pl-4 italic">
+                      "A RB SOROCABA NEGÓCIOS IMOBILIÁRIOS nasceu de um sonho: transformar a jornada de busca pelo lar ideal em uma experiência de pura satisfação e segurança."
+                    </p>
+                    <p>
+                      Fundada há mais de uma década pelo visionário Elias Borges, a imobiliária iniciou suas atividades com o foco voltado para o atendimento personalizado e humano. Desde o primeiro dia, entendemos que não estávamos apenas vendendo paredes e telhados, mas ajudando a construir capítulos fundamentais na vida de nossos clientes.
+                    </p>
+                    <p>
+                      Ao longo dos anos, consolidamos nossa posição no mercado de Sorocaba e região como sinônimo de ética, transparência e curadoria de excelência. Nossa equipe cresceu, integrando profissionais como Cleidiane Borges, que compartilham os mesmos valores fundamentais de dedicação absoluta ao cliente.
+                    </p>
+                    <p>
+                      Especializamo-nex no segmento de médio e alto padrão, entendendo as nuances e exigências desse mercado. Hoje, a RB SOROCABA é referência em assessoria imobiliária estratégica, oferecendo não apenas um catálogo premium, mas um suporte completo que inclui análise documental rigorosa, consultoria de investimentos e um concierge dedicado.
+                    </p>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-brand-dark uppercase tracking-tighter">Sincronizando com a Nuvem</h3>
-                  <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Buscando as melhores oportunidades em tempo real...</p>
+                <div className="relative group">
+                  <div className="absolute inset-0 bg-brand-orange/15 rounded-[3rem] blur-3xl opacity-30 group-hover:opacity-50 transition-opacity" />
+                  <div className="relative rounded-[3rem] overflow-hidden aspect-square shadow-2xl border-4 border-white bg-slate-100">
+                    <img 
+                      src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?q=80&w=1000&auto=format&fit=crop" 
+                      alt="Reunião Corporativa" 
+                      className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-105"
+                    />
+                  </div>
                 </div>
               </div>
-            ) : filteredProperties.length > 0 ? (
-              filteredProperties.map(property => (
-                <div key={property.id}>
-                  <PropertyCard 
-                    property={property} 
-                    isFavorite={userFavorites.includes(String(property.id))}
-                    onToggleFavorite={handleToggleFavorite}
-                    onSelect={(p) => {
-                      setSelectedPropertyForVisit(p);
-                      setIsVisitModalOpen(true);
-                    }}
-                  />
+            </div>
+          </section>
+
+          {/* Mission, Vision, Values and Call to Action */}
+          <section className="py-24 bg-white relative overflow-hidden border-t border-slate-100">
+            <div className="container mx-auto px-6">
+              <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-8">
+                <div className="bg-slate-50 p-8 md:p-10 rounded-3xl border border-slate-100 hover:border-brand-orange/30 transition-all flex flex-col justify-between group">
+                  <div className="space-y-4">
+                    <div className="w-12 h-12 bg-brand-orange/10 text-brand-orange rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                      <Star size={24} />
+                    </div>
+                    <h4 className="text-xl font-black uppercase tracking-tight">Missão</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed font-semibold">
+                      Entregar soluções imobiliárias de alto padrão com ética, segurança e sofisticação, transformando aspirações de moradia e investimento em realidades extraordinárias.
+                    </p>
+                  </div>
                 </div>
-              ))
-            ) : (
-                <div className="col-span-full py-20 md:py-32 text-center bg-white rounded-[2rem] md:rounded-[3.5rem] border-2 border-dashed border-slate-100">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-8 text-slate-300">
-                  <Search size={40} />
+
+                <div className="bg-slate-50 p-8 md:p-10 rounded-3xl border border-slate-100 hover:border-brand-orange/30 transition-all flex flex-col justify-between group">
+                  <div className="space-y-4">
+                    <div className="w-12 h-12 bg-brand-orange/10 text-brand-orange rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                      <Eye size={24} />
+                    </div>
+                    <h4 className="text-xl font-black uppercase tracking-tight">Visão</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed font-semibold">
+                      Ser reconhecida como a imobiliária boutique de elite referência em Sorocaba e região paulista, estabelecendo os mais altos níveis de qualidade e curadoria estratégica.
+                    </p>
+                  </div>
                 </div>
-                <h3 className="text-3xl font-black tracking-tighter mb-4 uppercase">Ops! Nada por aqui.</h3>
-                <p className="text-xl text-slate-400 font-medium max-w-lg mx-auto leading-relaxed">
-                  {showOnlyFavorites 
-                    ? "Você ainda não possui imóveis favoritados. Explore nosso catálogo e clique no ícone de estrela para salvar seus preferidos."
-                    : "Não encontramos nenhum imóvel que corresponda aos seus filtros atuais."}
-                </p>
-                <button 
-                  onClick={() => {
-                    setSearchTerm(''); 
-                    setCategoryFilter('Todas');
-                    setTypeFilter('Todas');
-                    setMinPrice('');
-                    setMaxPrice('');
-                    setSortBy('default');
-                    setShowOnlyFavorites(false);
-                  }}
-                  className="mt-10 btn-primary !px-10 !py-4 uppercase text-xs tracking-widest font-black"
+
+                <div className="bg-slate-50 p-8 md:p-10 rounded-3xl border border-slate-100 hover:border-brand-orange/30 transition-all flex flex-col justify-between group">
+                  <div className="space-y-4">
+                    <div className="w-12 h-12 bg-brand-orange/10 text-brand-orange rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                      <Shield size={24} />
+                    </div>
+                    <h4 className="text-xl font-black uppercase tracking-tight">Valores</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed font-semibold">
+                      Énica inabalável, transparência cirúrgica, zelo patrimonial, confidencialidade total e dedicação absoluta ao sucesso de nossos clientes parceiros.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="py-20 bg-brand-dark text-white relative overflow-hidden">
+            <div className="container mx-auto px-6 text-center relative z-10">
+              <h3 className="text-3xl md:text-5xl font-black uppercase mb-6 tracking-tight leading-none">
+                Pronto para encontrar <br />o extraordinário?
+              </h3>
+              <p className="text-white/60 text-base md:text-lg max-w-xl mx-auto mb-10 font-semibold leading-relaxed">
+                Agende sua consultoria personalizada com nossa diretoria corporativa e filtre grandes negócios off-market.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                <a 
+                  href={`https://wa.me/${BROKER_PHONE}`} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn-primary !px-10 !py-4 uppercase text-xs tracking-widest font-black"
                 >
-                  Ver Todos os Imóveis
+                  Falar com um Diretor
+                </a>
+                <button 
+                  onClick={() => navigateTo("/contato")} 
+                  className="bg-transparent border border-white/20 hover:bg-white/10 text-white px-10 py-4 rounded-full font-black uppercase tracking-widest text-xs transition-colors"
+                >
+                  Contato Corporativo
                 </button>
               </div>
-            )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* --- Página de Propriedades --- */}
+      {currentPath === "/propriedades" && (
+        <>
+          {/* Header Banner */}
+          <div className="bg-black text-white pt-40 pb-20 md:pb-32 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-brand-orange/15 rounded-full blur-[150px] -mr-40 -mt-40" />
+            <div className="container mx-auto px-6 relative z-10 text-center">
+              <div className="flex items-center justify-center space-x-4 mb-4">
+                <div className="w-12 h-[2px] bg-brand-orange" />
+                <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Portfólio Premium</span>
+                <div className="w-12 h-[2px] bg-brand-orange" />
+              </div>
+              <h1 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6">
+                Buscar <span className="text-brand-orange">Imóveis</span>
+              </h1>
+              <p className="text-white/60 text-lg md:text-2xl max-w-2xl mx-auto font-medium">
+                Conheça nossa seleção de luxo de casas, apartamentos e chácaras exclusivas em Sorocaba e região.
+              </p>
+            </div>
           </div>
-        </div>
-      </section>
+
+          {/* --- Property Listing --- */}
+          <section id="properties" className="py-24 md:py-48 bg-[#f9f9f9]">
+            <div className="container mx-auto px-6">
+              <div className="flex flex-col md:flex-row justify-between items-end mb-16 md:mb-24 gap-10">
+                <motion.div 
+                  initial={{ opacity: 0, y: 30 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  className="max-w-2xl text-center md:text-left"
+                >
+                  <div className="flex items-center justify-center md:justify-start space-x-4 mb-6">
+                    <div className="w-12 h-[2px] bg-brand-orange" />
+                    <span className="text-brand-orange font-black uppercase tracking-[0.5em] text-[10px]">Curadoria Exclusiva</span>
+                  </div>
+                  <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-8">
+                    VITRINE <br />
+                    <span className="text-transparent" style={{ WebkitTextStroke: '2px #1e293b' }}>EXTRAORDINÁRIA</span>
+                  </h2>
+                  <p className="text-slate-500 font-medium md:text-xl max-w-lg leading-relaxed">
+                    Cada m² foi selecionado para superar as expectativas mais exigentes do mercado de alto padrão em Sorocaba.
+                  </p>
+                </motion.div>
+                
+                <motion.div 
+                  initial={{ opacity: 0, x: 30 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  className="flex flex-wrap justify-center items-center gap-4 md:gap-6"
+                >
+                  {currentUser && (
+                    <button 
+                      onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
+                      className={`flex items-center space-x-3 px-8 md:px-10 py-4 md:py-6 rounded-full text-[10px] font-black uppercase tracking-widest transition-all shadow-2xl border-2 ${
+                        showOnlyFavorites 
+                          ? 'bg-brand-orange text-white border-brand-orange shadow-orange-500/20' 
+                          : 'bg-white text-brand-dark border-transparent hover:border-brand-orange/20'
+                      }`}
+                    >
+                      <Star size={16} fill={showOnlyFavorites ? "currentColor" : "none"} />
+                      <span>Favoritos ({userFavorites.length})</span>
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowMegaFilter(true)}
+                    className="group relative px-8 md:px-12 py-4 md:py-6 rounded-full bg-brand-dark text-white text-[10px] font-black uppercase tracking-widest overflow-hidden transition-all shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:shadow-orange-500/20"
+                  >
+                    <span className="relative z-10">Filtros Avançados</span>
+                    <div className="absolute inset-0 bg-brand-orange translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
+                  </button>
+                </motion.div>
+              </div>
+
+              {/* Active Filter Chips Display Block */}
+              {(() => {
+                const hasActiveFilters = 
+                  searchTerm || 
+                  (bairroFilter && bairroFilter !== 'Todos') || 
+                  (purposeFilter && purposeFilter !== 'Todas') || 
+                  (categoryFilter && categoryFilter !== 'Todas') || 
+                  (typeFilter && typeFilter !== 'Todas') || 
+                  cepFilter || 
+                  bedroomsFilter !== '' || 
+                  suitesFilter !== '' || 
+                  parkingFilter !== '' || 
+                  minPrice !== '' || 
+                  maxPrice !== '' || 
+                  minAreaFilter !== '' || 
+                  maxAreaFilter !== '';
+
+                if (!hasActiveFilters) return null;
+
+                const clearAllFilters = () => {
+                  setSearchTerm('');
+                  setBairroFilter('Todos');
+                  setPurposeFilter('Todas');
+                  setCategoryFilter('Todas');
+                  setTypeFilter('Todas');
+                  setCepFilter('');
+                  setBedroomsFilter('');
+                  setSuitesFilter('');
+                  setParkingFilter('');
+                  setMinPrice('');
+                  setMaxPrice('');
+                  setMinPriceDisplay('');
+                  setMaxPriceDisplay('');
+                  setMinAreaFilter('');
+                  setMaxAreaFilter('');
+                  setCepBairro('');
+                  setCepCidade('');
+                  setCityFilter('');
+                  
+                  navigateTo('/propriedades');
+                };
+
+                return (
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 mb-12 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mr-2">Filtros Ativos:</span>
+                      
+                      {searchTerm && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Busca: {searchTerm}
+                          <button onClick={() => setSearchTerm('')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {bairroFilter && bairroFilter !== 'Todos' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Bairro: {bairroFilter}
+                          <button onClick={() => setBairroFilter('Todos')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {purposeFilter && purposeFilter !== 'Todas' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Finalidade: {purposeFilter}
+                          <button onClick={() => setPurposeFilter('Todas')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {categoryFilter && categoryFilter !== 'Todas' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Cat: {categoryFilter}
+                          <button onClick={() => setCategoryFilter('Todas')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {typeFilter && typeFilter !== 'Todas' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Tipo: {typeFilter}
+                          <button onClick={() => setTypeFilter('Todas')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {cepFilter && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          CEP: {cepFilter}
+                          <button onClick={() => { setCepFilter(''); setCepBairro(''); setCepCidade(''); }} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {bedroomsFilter !== '' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Quartos: {bedroomsFilter}+
+                          <button onClick={() => setBedroomsFilter('')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {suitesFilter !== '' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Suítes: {suitesFilter}+
+                          <button onClick={() => setSuitesFilter('')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {parkingFilter !== '' && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Vagas: {parkingFilter}+
+                          <button onClick={() => setParkingFilter('')} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {(minPrice !== '' || maxPrice !== '') && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Preço: {minPrice !== '' ? formatCurrency(minPrice) : 'R$ 0'} - {maxPrice !== '' ? formatCurrency(maxPrice) : '∞'}
+                          <button onClick={() => { setMinPrice(''); setMaxPrice(''); setMinPriceDisplay(''); setMaxPriceDisplay(''); }} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                      {(minAreaFilter !== '' || maxAreaFilter !== '') && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-full font-bold text-xs transition-colors">
+                          Área: {minAreaFilter !== '' ? `${minAreaFilter}m²` : '0m²'} - {maxAreaFilter !== '' ? `${maxAreaFilter}m²` : '∞'}
+                          <button onClick={() => { setMinAreaFilter(''); setMaxAreaFilter(''); }} className="text-slate-400 hover:text-slate-800"><X size={12} /></button>
+                        </span>
+                      )}
+                    </div>
+                    <button 
+                      onClick={clearAllFilters}
+                      className="text-brand-orange hover:text-orange-600 font-bold uppercase tracking-widest text-[10px] whitespace-nowrap border-b border-dashed border-brand-orange/50 pb-0.5"
+                    >
+                      Limpar Filtros
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {cepFilter && !exactCepMatchesExist && (
+                <div className="col-span-full py-8 text-center bg-amber-50 rounded-2xl border border-amber-200/50 p-6 shadow-sm mb-12">
+                  <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3 text-amber-600">
+                    <MapPin size={24} />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800 mb-1">Nenhum imóvel encontrado nesse CEP exato</h3>
+                  <p className="text-slate-500 text-xs max-w-lg mx-auto leading-relaxed">
+                    Mostrando opções próximas da mesma região de {cepBairro || 'Sorocaba'}.
+                  </p>
+                </div>
+              )}
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-12 md:gap-16">
+                {isLoading ? (
+                    <div className="col-span-full py-20 md:py-32 flex flex-col items-center justify-center text-center space-y-6">
+                    <div className="relative">
+                      <div className="w-20 h-20 border-4 border-slate-100 border-t-brand-orange rounded-full animate-spin" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-10 h-10 bg-brand-orange/10 rounded-full animate-pulse" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="text-2xl font-black text-brand-dark uppercase tracking-tighter">Sincronizando com a Nuvem</h3>
+                      <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Buscando as melhores oportunidades em tempo real...</p>
+                    </div>
+                  </div>
+                ) : filteredProperties.length > 0 ? (
+                  filteredProperties.map(property => (
+                    <div key={property.id}>
+                      <PropertyCard 
+                        property={property} 
+                        isFavorite={userFavorites.includes(String(property.id))}
+                        onToggleFavorite={handleToggleFavorite}
+                        onSelect={(p) => {
+                          setSelectedPropertyForVisit(p);
+                          setIsVisitModalOpen(true);
+                        }}
+                        onViewDetails={(p) => {
+                          const code = p.codigoImovel || p.codigo || p.id;
+                          window.history.pushState({}, document.title, `/imovel/${code}`);
+                          setViewingProperty(p);
+                        }}
+                      />
+                    </div>
+                  ))
+                ) : (
+                    <div className="col-span-full py-20 md:py-32 text-center bg-white rounded-[2rem] md:rounded-[3.5rem] border-2 border-dashed border-slate-100">
+                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-8 text-slate-300">
+                      <Search size={40} />
+                    </div>
+                    <h3 className="text-3xl font-black tracking-tighter mb-4 uppercase">Ops! Nada por aqui.</h3>
+                    <p className="text-xl text-slate-400 font-medium max-w-lg mx-auto leading-relaxed">
+                      {showOnlyFavorites 
+                        ? "Você ainda não possui imóveis favoritados. Explore nosso catálogo e clique no ícone de estrela para salvar seus preferidos."
+                        : "Não encontramos nenhum imóvel que corresponda aos seus filtros atuais."}
+                    </p>
+                    <button 
+                      onClick={() => {
+                        setSearchTerm(''); 
+                        setCategoryFilter('Todas');
+                        setTypeFilter('Todas');
+                        setMinPrice('');
+                        setMaxPrice('');
+                        setSortBy('default');
+                        setShowOnlyFavorites(false);
+                      }}
+                      className="mt-10 btn-primary !px-10 !py-4 uppercase text-xs tracking-widest font-black"
+                    >
+                      Ver Todos os Imóveis
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
 
       {/* --- Designer CTA Section --- */}
+      {(currentPath === "/" || currentPath === "/propriedades") && (
       <section className="py-24 bg-brand-dark relative overflow-hidden">
         <div className="absolute top-0 right-0 w-1/3 h-full opacity-10 pointer-events-none">
           <svg viewBox="0 0 100 100" className="w-full h-full fill-white">
@@ -4703,8 +6009,10 @@ export default function App() {
           </motion.div>
         </div>
       </section>
+      )}
 
       {/* --- Featured Large Property Carousel --- */}
+      {currentPath === "/" && (
       <section className="py-24 bg-white overflow-hidden">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
@@ -4824,82 +6132,117 @@ export default function App() {
         </div>
       </div>
     </section>
+    )}
 
-      <section id="team" className="py-24 md:py-48 bg-[#fafafa]">
-        <div className="container mx-auto px-6">
-          <div className="flex flex-col items-center text-center mb-20 md:mb-32">
-            <motion.div 
-               initial={{ opacity: 0, scale: 0.8 }}
-               whileInView={{ opacity: 1, scale: 1 }}
-               viewport={{ once: true }}
-               className="w-16 h-16 bg-brand-orange/10 rounded-2xl flex items-center justify-center mb-8"
-            >
-               <div className="w-2 h-2 bg-brand-orange rounded-full animate-ping" />
-            </motion.div>
-            <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.8] mb-8">
-              A ELITE DO <br />
-              <span className="text-transparent" style={{ WebkitTextStroke: '1.5px #fb923c' }}>MERCADO</span>
-            </h2>
-            <p className="text-slate-500 max-w-xl mx-auto text-sm md:text-xl leading-relaxed font-medium md:border-t border-slate-200 pt-8">
-              Arquitetamos negociações de alto nível com a discrição e a expertise que seu patrimônio exige.
-            </p>
+      {/* --- Página de Corretores --- */}
+      {currentPath === "/corretores" && (
+        <>
+          {/* Brokers Corporate Header Banner */}
+          <div className="bg-black text-white pt-40 pb-20 md:pb-32 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-96 h-96 bg-brand-orange/15 rounded-full blur-[150px] -mr-40 -mt-40" />
+            <div className="container mx-auto px-6 relative z-10 text-center">
+              <div className="flex items-center justify-center space-x-4 mb-4">
+                <div className="w-12 h-[2px] bg-brand-orange" />
+                <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Exclusividade RB</span>
+                <div className="w-12 h-[2px] bg-brand-orange" />
+              </div>
+              <h1 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6">
+                Nossos <span className="text-brand-orange">Corretores</span>
+              </h1>
+              <p className="text-white/60 text-lg md:text-2xl max-w-2xl mx-auto font-medium">
+                Profissionais qualificados da RB Sorocaba, prontos para conduzir suas negociações em Sorocaba e região com a máxima discrição.
+              </p>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-12 md:gap-20 max-w-5xl mx-auto">
-            {TEAM.map(member => (
-              <motion.div 
-                key={member.id}
-                whileHover={{ y: -15 }}
-                className="group relative"
-              >
-                <div className="relative mb-10 overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.1)] rounded-[3rem] aspect-[4/5] bg-slate-200">
-                  <img 
-                    src={member.image} 
-                    alt={member.name} 
-                    className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-110" 
-                    referrerPolicy="no-referrer" 
-                  />
-                  <div className="absolute inset-x-0 bottom-0 p-10 bg-gradient-to-t from-brand-dark/95 via-brand-dark/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700">
-                    <div className="flex justify-center space-x-6 translate-y-10 group-hover:translate-y-0 transition-transform duration-700">
-                      {member.instagram && (
-                        <a 
-                          href={`https://instagram.com/${member.instagram}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
-                        >
-                          <Instagram size={24} />
-                        </a>
-                      )}
-                      {member.whatsapp && (
-                        <a 
-                          href={`https://wa.me/${member.whatsapp}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
-                        >
-                          <MessageCircle size={24} />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                  <div className="absolute top-8 left-8 bg-black/80 backdrop-blur-xl border border-white/10 text-white px-5 py-2 rounded-full text-[9px] font-black uppercase tracking-widest leading-none">
-                    Certified Expert
-                  </div>
-                </div>
-                <div className="text-center">
-                  <h4 className="text-2xl md:text-4xl font-black text-brand-dark mb-2 uppercase tracking-tighter">{member.name}</h4>
-                  <div className="flex flex-col items-center gap-1">
-                    <p className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px] md:text-xs bg-brand-orange/5 px-4 py-1 rounded-full">{member.role}</p>
-                    {member.creci && <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{member.creci}</p>}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+          <section id="team" className="py-24 md:py-48 bg-[#fafafa]">
+            <div className="container mx-auto px-6">
+              <div className="flex flex-col items-center text-center mb-20 md:mb-32">
+                <motion.div 
+                   initial={{ opacity: 0, scale: 0.8 }}
+                   whileInView={{ opacity: 1, scale: 1 }}
+                   viewport={{ once: true }}
+                   className="w-16 h-16 bg-brand-orange/10 rounded-2xl flex items-center justify-center mb-8"
+                >
+                   <div className="w-2 h-2 bg-brand-orange rounded-full animate-ping" />
+                </motion.div>
+                <h2 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.8] mb-8">
+                  A ELITE DO <br />
+                  <span className="text-transparent" style={{ WebkitTextStroke: '1.5px #fb923c' }}>MERCADO</span>
+                </h2>
+                <p className="text-slate-500 max-w-xl mx-auto text-sm md:text-xl leading-relaxed font-semibold md:border-t border-slate-200 pt-8">
+                  Arquitetamos negociações de alto nível com a discrição e a expertise que seu patrimônio exige.
+                </p>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-12 md:gap-20 max-w-5xl mx-auto">
+                {(dbBrokers && dbBrokers.length > 0 ? dbBrokers : TEAM).map(member => {
+                  const nameStr = member.nome || member.name;
+                  const roleStr = member.role || "Consultor Imobiliário";
+                  const imageStr = member.fotoUrl || member.image || "https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=400";
+                  const rawWhatsapp = member.whatsapp || member.telefone || "";
+                  const whatsappLink = rawWhatsapp.startsWith("http") ? rawWhatsapp : `https://wa.me/${rawWhatsapp.replace(/\D/g, '')}`;
+                  const displayCreci = member.creci ? (member.creci.toUpperCase().includes("CRECI") ? member.creci : `CRECI ${member.creci}`) : "";
+
+                  return (
+                    <motion.div 
+                      key={member.id}
+                      whileHover={{ y: -15 }}
+                      className="group relative"
+                    >
+                      <div className="relative mb-10 overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.1)] rounded-[3rem] aspect-[4/5] bg-slate-200">
+                        <img 
+                          src={imageStr} 
+                          alt={nameStr} 
+                          className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-110" 
+                          referrerPolicy="no-referrer" 
+                        />
+                        <div className="absolute inset-x-0 bottom-0 p-10 bg-gradient-to-t from-brand-dark/95 via-brand-dark/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700">
+                          <div className="flex justify-center space-x-6 translate-y-10 group-hover:translate-y-0 transition-transform duration-700">
+                            {member.instagram && (
+                              <a 
+                                href={`https://instagram.com/${member.instagram}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
+                              >
+                                <Instagram size={24} />
+                              </a>
+                            )}
+                            {rawWhatsapp && (
+                              <a 
+                                href={whatsappLink} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="w-14 h-14 bg-white/10 backdrop-blur-2xl rounded-full flex items-center justify-center text-white hover:bg-brand-orange hover:shadow-[0_10px_20px_rgba(251,146,60,0.4)] transition-all"
+                              >
+                                <MessageCircle size={24} />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                        <div className="absolute top-8 left-8 bg-black/80 backdrop-blur-xl border border-white/10 text-white px-5 py-2 rounded-full text-[9px] font-black uppercase tracking-widest leading-none">
+                          Certified Expert
+                        </div>
+                      </div>
+                      <div className="text-center animate-fade-in">
+                        <h4 className="text-2xl md:text-4xl font-black text-brand-dark mb-2 uppercase tracking-tighter">{nameStr}</h4>
+                        <div className="flex flex-col items-center gap-1">
+                          <p className="text-brand-orange font-black uppercase tracking-[0.4em] text-[10px] md:text-xs bg-brand-orange/5 px-4 py-1 rounded-full">{roleStr}</p>
+                          {displayCreci && <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest mt-2">{displayCreci}</p>}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* --- Testemunhos --- */}
+      {currentPath === "/" && (
       <section className="py-24 md:py-48 bg-white overflow-hidden">
         <div className="container mx-auto px-6">
           <div className="relative bg-brand-dark rounded-[3rem] md:rounded-[6rem] p-8 md:p-24 shadow-[0_100px_200px_rgba(0,0,0,0.4)] overflow-hidden">
@@ -4955,8 +6298,32 @@ export default function App() {
           </div>
         </div>
       </section>
+      )}
 
-      <section id="contact" className="py-16 md:py-32 bg-[#fcfcfc] relative overflow-hidden">
+      {/* --- Página de Contato / Contato Rápido --- */}
+      {(currentPath === "/" || currentPath === "/contato") && (
+        <>
+          {/* Contact Header Banner */}
+          {currentPath === "/contato" && (
+            <div className="bg-black text-white pt-40 pb-20 md:pb-32 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-brand-orange/15 rounded-full blur-[150px] -mr-40 -mt-40" />
+              <div className="container mx-auto px-6 relative z-10 text-center">
+                <div className="flex items-center justify-center space-x-4 mb-4">
+                  <div className="w-12 h-[2px] bg-brand-orange" />
+                  <span className="text-brand-orange font-bold uppercase tracking-[0.4em] text-xs">Atendimento Executivo</span>
+                  <div className="w-12 h-[2px] bg-brand-orange" />
+                </div>
+                <h1 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6">
+                  Fale <span className="text-brand-orange">Conosco</span>
+                </h1>
+                <p className="text-white/60 text-lg md:text-2xl max-w-2xl mx-auto font-medium">
+                  Entre em contato direto com nossos assessores especializados ou envie uma mensagem corporativa.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <section id="contact" className="py-16 md:py-32 bg-[#fcfcfc] relative overflow-hidden">
         <div className="absolute bottom-0 right-0 w-1/3 h-1/2 bg-brand-orange/5 blur-[120px] rounded-full" />
         <div className="container mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-12 md:gap-24 items-center">
@@ -4997,8 +6364,11 @@ export default function App() {
           </div>
         </div>
       </section>
+        </>
+      )}
 
       {/* --- Interactive Map Section --- */}
+      {(currentPath === "/" || currentPath === "/contato") && (
       <section className="py-24 bg-white relative">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
@@ -5130,6 +6500,7 @@ export default function App() {
           </div>
         </div>
       </section>
+      )}
 
       <AnimatePresence>
         {isLoginModalOpen && (

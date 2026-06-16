@@ -51,13 +51,16 @@ import {
   PlusCircle,
   User,
   Sparkles,
-  Copy
+  Copy,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth, logout, loginWithGoogle, submitProperty, getSubmissions, approveProperty, rejectProperty } from '../lib/firebase';
+import { db, auth, logout, loginWithGoogle, submitProperty, getSubmissions, approveProperty, rejectProperty, getPrefixoCodigoImovel, obterPreviaCodigoImovel, seedDefaultSettingsIfEmpty } from '../lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { exportReportToPDF } from '../lib/pdfExport';
 import ConfigOptionManager from './ConfigOptionManager';
+import { CurrencyInput, normalizeCurrencyField, formatNumberToCurrencyBR, parseCurrencyInputBR } from './CurrencyInput';
+import { PercentInput, formatPercentBR } from './PercentInput';
 
 // Re-using same Property interface for consistency
 export interface Property {
@@ -705,6 +708,7 @@ export default function OwnerPortal({
   onDeleteVisit,
   onClose,
   isAuthorized,
+  onViewFichaTecnica,
   optTiposImovel = [],
   optTiposNegocio = [],
   optStatusImovel = [],
@@ -716,7 +720,8 @@ export default function OwnerPortal({
   optLazer = [],
   optInstalacoes = [],
   optAcabamentos = [],
-  optProximidades = []
+  optProximidades = [],
+  optCategoriasImovel = []
 }: {
   properties: Property[],
   scheduledVisits: any[],
@@ -730,6 +735,7 @@ export default function OwnerPortal({
   onDeleteVisit?: (id: string) => Promise<void>,
   onClose: () => void,
   isAuthorized: boolean,
+  onViewFichaTecnica?: (p: Property) => void,
   optTiposImovel?: any[],
   optTiposNegocio?: any[],
   optStatusImovel?: any[],
@@ -741,7 +747,8 @@ export default function OwnerPortal({
   optLazer?: any[],
   optInstalacoes?: any[],
   optAcabamentos?: any[],
-  optProximidades?: any[]
+  optProximidades?: any[],
+  optCategoriasImovel?: any[]
 }) {
   const currentUser = auth.currentUser;
 
@@ -761,6 +768,27 @@ export default function OwnerPortal({
 
   const [opcoesCadastro, setOpcoesCadastro] = useState<Record<string, any[]>>({});
   const [loadingOpcoes, setLoadingOpcoes] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedReport, setSeedReport] = useState<any>(null);
+
+  const handleSeedOptions = async () => {
+    try {
+      setIsSeeding(true);
+      const res = await seedDefaultSettingsIfEmpty();
+      if (res.success) {
+        alert("Opções padrão adicionadas com sucesso.");
+        setSeedReport(res);
+        await carregarTodasOpcoes();
+      } else {
+        alert("Erro ao adicionar opções padrão: " + res.message);
+      }
+    } catch (error) {
+      console.error("Erro no seed de opções:", error);
+      alert("Ocorreu um erro ao carregar as opções.");
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   const carregarTodasOpcoes = async () => {
     try {
@@ -777,7 +805,9 @@ export default function OwnerPortal({
         "tiposImovel",
         "tiposNegocio",
         "cidades",
-        "bairros"
+        "bairros",
+        "caracteristicasApartamento",
+        "categoriasImovel"
       ];
 
       const resultado: Record<string, any[]> = {};
@@ -800,6 +830,29 @@ export default function OwnerPortal({
 
   const opcoesCaracteristicas = useMemo(() => {
     return opcoesCadastro.caracteristicas || FALLBACK_CARACTERISTICAS;
+  }, [opcoesCadastro]);
+
+  const opcoesCaracteristicasApartamento = useMemo(() => {
+    return opcoesCadastro.caracteristicasApartamento || [];
+  }, [opcoesCadastro]);
+
+  const opcoesCategoriasImovel = useMemo(() => {
+    return opcoesCadastro.categoriasImovel || [];
+  }, [opcoesCadastro]);
+
+  const opcoesStatusImovel = useMemo(() => {
+    const list = opcoesCadastro.statusImovel || [];
+    if (list.length > 0) {
+      return list.map((item: any) => {
+        if (typeof item === 'string') return item;
+        return item.nome || item.label || item.value || '';
+      }).filter(Boolean);
+    }
+    return ["Disponível", "Alugado", "Vendido", "Reservado", "Indisponível", "Em negociação", "Em análise", "Rascunho"];
+  }, [opcoesCadastro]);
+
+  const opcoesTiposImovel = useMemo(() => {
+    return opcoesCadastro.tiposImovel || FALLBACK_TIPOS_IMOVEL;
   }, [opcoesCadastro]);
 
   const opcoesAmbientes = useMemo(() => {
@@ -1483,7 +1536,7 @@ export default function OwnerPortal({
 
   // Advanced site internal settings tabs and structures
   const [settingsSubTab, setSettingsSubTab] = useState<'home' | 'sections' | 'company' | 'options' | 'locations' | 'features' | 'appearance'>('home');
-  const [activeOptionsTab, setActiveOptionsTab] = useState<'tiposImovel' | 'tiposNegocio' | 'statusImovel' | 'faixasPreco'>('tiposImovel');
+  const [activeOptionsTab, setActiveOptionsTab] = useState<'tiposImovel' | 'tiposNegocio' | 'statusImovel' | 'faixasPreco' | 'categoriasImovel'>('tiposImovel');
   const [activeLocationsTab, setActiveLocationsTab] = useState<'cidades' | 'bairros'>('cidades');
   const [activeFeaturesTab, setActiveFeaturesTab] = useState<'caracteristicas' | 'instalacoes' | 'acabamentos' | 'lazer' | 'ambientes' | 'caracteristicasApartamento' | 'caracteristicasEmpreendimento' | 'proximidades'>('caracteristicas');
 
@@ -1565,8 +1618,10 @@ export default function OwnerPortal({
     nome: '',
     creci: '',
     telefone: '',
+    whatsapp: '',
     email: '',
     fotoUrl: '',
+    foto: '',
     ativo: true
   });
   const [formNeighborhood, setFormNeighborhood] = useState({
@@ -1592,32 +1647,28 @@ export default function OwnerPortal({
         alert("O nome do corretor é obrigatório.");
         return;
       }
+      const dataToSave = {
+        nome: formBroker.nome,
+        creci: formBroker.creci || "",
+        telefone: formBroker.telefone || "",
+        whatsapp: formBroker.whatsapp || "",
+        email: formBroker.email || "",
+        fotoUrl: formBroker.fotoUrl || formBroker.foto || "",
+        foto: formBroker.fotoUrl || formBroker.foto || "",
+        ativo: formBroker.ativo
+      };
       if (editingBroker) {
         // Update existing corretor
-        await setDoc(doc(db, "corretores", editingBroker.id), {
-          nome: formBroker.nome,
-          creci: formBroker.creci || "",
-          telefone: formBroker.telefone || "",
-          email: formBroker.email || "",
-          fotoUrl: formBroker.fotoUrl || "",
-          ativo: formBroker.ativo
-        }, { merge: true });
+        await setDoc(doc(db, "corretores", editingBroker.id), dataToSave, { merge: true });
         alert("Corretor atualizado com sucesso!");
       } else {
         // Add new corretor
-        await addDoc(collection(db, "corretores"), {
-          nome: formBroker.nome,
-          creci: formBroker.creci || "",
-          telefone: formBroker.telefone || "",
-          email: formBroker.email || "",
-          fotoUrl: formBroker.fotoUrl || "",
-          ativo: formBroker.ativo
-        });
+        await addDoc(collection(db, "corretores"), dataToSave);
         alert("Corretor cadastrado com sucesso!");
       }
       setIsBrokerModalOpen(false);
       setEditingBroker(null);
-      setFormBroker({ nome: '', creci: '', telefone: '', email: '', fotoUrl: '', ativo: true });
+      setFormBroker({ nome: '', creci: '', telefone: '', whatsapp: '', email: '', fotoUrl: '', foto: '', ativo: true });
       fetchBrokers();
     } catch (error) {
       console.error("Erro ao salvar corretor:", error);
@@ -2388,6 +2439,330 @@ export default function OwnerPortal({
     }
   };
 
+  // --- AUTOMATION STATUS FUNCTIONS & HELPER RULES ---
+  const applyStatusRules = (status: string, tipoNegocio: string, currentData: any) => {
+    const updated = { ...currentData };
+    updated.status = status;
+    updated.statusImovel = status;
+
+    if (status === "Disponível") {
+      updated.vendido = false;
+      updated.alugado = false;
+      updated.reservado = false;
+      updated.indisponivel = false;
+      updated.emNegociacao = false;
+      updated.disponivelParaVisita = true;
+      updated.disponivelParaProposta = true;
+      updated.publicado = true;
+      updated.publicadoNoSite = true;
+
+      if (tipoNegocio === "Venda") {
+        updated.disponivelParaVenda = true;
+        updated.disponivelParaLocacao = false;
+        updated.statusVenda = "Disponível";
+        updated.statusLocacao = "";
+      } else if (tipoNegocio === "Locação") {
+        updated.disponivelParaVenda = false;
+        updated.disponivelParaLocacao = true;
+        updated.statusVenda = "";
+        updated.statusLocacao = "Disponível";
+      } else if (tipoNegocio === "Venda e Locação") {
+        updated.disponivelParaVenda = true;
+        updated.disponivelParaLocacao = true;
+        updated.statusVenda = "Disponível";
+        updated.statusLocacao = "Disponível";
+      }
+    } else if (status === "Alugado") {
+      updated.alugado = true;
+      updated.vendido = false;
+      updated.reservado = false;
+      updated.statusLocacao = "Alugado";
+      updated.disponivelParaLocacao = false;
+      updated.disponivelParaVisita = false;
+
+      if (tipoNegocio === "Locação") {
+        updated.disponivelParaVenda = false;
+        updated.statusVenda = "";
+      } else if (tipoNegocio === "Venda e Locação") {
+        updated.vendido = false;
+        updated.statusVenda = "Disponível";
+        updated.disponivelParaVenda = true;
+        updated.publicado = true;
+        updated.publicadoNoSite = true;
+      }
+    } else if (status === "Vendido") {
+      updated.vendido = true;
+      updated.reservado = false;
+      if (tipoNegocio !== "Venda e Locação") {
+        updated.alugado = false;
+      }
+      updated.statusVenda = "Vendido";
+      updated.disponivelParaVenda = false;
+      updated.disponivelParaLocacao = false;
+      updated.disponivelParaVisita = false;
+      updated.disponivelParaProposta = false;
+      updated.mostrarBadgeVendido = true;
+    } else if (status === "Reservado") {
+      updated.reservado = true;
+      updated.vendido = false;
+      updated.alugado = false;
+      updated.disponivelParaProposta = false;
+      updated.disponivelParaVisita = false;
+      updated.publicado = true;
+      updated.publicadoNoSite = true;
+    } else if (status === "Indisponível") {
+      updated.indisponivel = true;
+      updated.publicado = false;
+      updated.publicadoNoSite = false;
+      updated.disponivelParaVenda = false;
+      updated.disponivelParaLocacao = false;
+      updated.disponivelParaVisita = false;
+      updated.disponivelParaProposta = false;
+    } else if (status === "Em negociação") {
+      updated.emNegociacao = true;
+      updated.reservado = false;
+      updated.vendido = false;
+      updated.alugado = false;
+      updated.publicado = true;
+      updated.publicadoNoSite = true;
+    } else if (status === "Rascunho") {
+      updated.publicado = false;
+      updated.publicadoNoSite = false;
+      updated.disponivelParaVenda = false;
+      updated.disponivelParaLocacao = false;
+      updated.disponivelParaVisita = false;
+      updated.disponivelParaProposta = false;
+    }
+
+    return updated;
+  };
+
+  const checkExistingActiveRental = async (imovelId: string) => {
+    if (!imovelId) return null;
+    const q = query(
+      collection(db, "locacoes"),
+      where("imovelId", "==", String(imovelId)),
+      where("status", "==", "Ativa")
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return { id: snap.docs[0].id, ...snap.docs[0].data() };
+    }
+    return null;
+  };
+
+  const checkExistingSale = async (imovelId: string) => {
+    if (!imovelId) return null;
+    const q = query(
+      collection(db, "vendas"),
+      where("imovelId", "==", String(imovelId))
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      return { id: snap.docs[0].id, ...snap.docs[0].data() };
+    }
+    return null;
+  };
+
+  const createAutomaticRentalFromProperty = async (imovel: any, forceNew: boolean = false, updateExistingId?: string) => {
+    const rentalValue = Number(imovel.autoValorAluguelMensal || imovel.valorAluguel || 0);
+    const commissionPercentage = Number(imovel.autoPercentualComissao || 10);
+    const commissionValue = rentalValue * (commissionPercentage / 100);
+
+    const locDoc = {
+      imovelId: String(imovel.id),
+      codigoImovel: String(imovel.codigoImovel || imovel.codigo || ""),
+      tituloImovel: String(imovel.title || imovel.titulo || ""),
+      tipoImovel: String(imovel.type || imovel.tipoImovel || ""),
+      enderecoImovel: String(imovel.endereco || ""),
+      bairroImovel: String(imovel.bairro || imovel.neighborhood || ""),
+      cidadeImovel: String(imovel.cidade || imovel.city || "Sorocaba"),
+      
+      proprietarioId: String(imovel.ownerId || imovel.proprietarioId || ""),
+      proprietarioNome: String(imovel.nomeProprietario || imovel.emailProprietario?.split('@')[0] || "Proprietário"),
+      proprietarioEmail: String(imovel.emailProprietarioForm || imovel.emailProprietario || ""),
+      proprietarioTelefone: String(imovel.telefoneProprietario || imovel.whatsappProprietario || ""),
+      
+      locatarioNome: String(imovel.autoLocatarioNome || ""),
+      locatarioCpfCnpj: String(imovel.autoLocatarioCpfCnpj || ""),
+      locatarioTelefone: String(imovel.autoLocatarioTelefone || ""),
+      locatarioEmail: String(imovel.autoLocatarioEmail || ""),
+      
+      dataInicio: String(imovel.autoDataInicio || ""),
+      dataFim: String(imovel.autoDataFim || ""),
+      diaVencimento: String(imovel.autoDiaVencimento || "10"),
+      
+      valorAluguelMensal: rentalValue,
+      valorCondominio: Number(imovel.autoValorCondominio || imovel.valorCondominio || 0),
+      valorIptu: Number(imovel.autoValorIptu || imovel.valorIptuAnual || 0),
+      taxaLixo: Number(imovel.autoTaxaLixo || imovel.taxaLixoAnual || 0),
+      taxaAgua: Number(imovel.autoTaxaAgua || 0),
+      taxaLuz: Number(imovel.autoTaxaLuz || 0),
+      taxaGas: Number(imovel.autoTaxaGas || 0),
+      seguroIncendio: Number(imovel.autoSeguroIncendio || 0),
+      
+      percentualComissao: commissionPercentage,
+      valorComissao: commissionValue,
+      
+      status: "Ativa",
+      origem: "cadastro_imovel_status_alugado",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    let rentalId = updateExistingId;
+    if (updateExistingId && !forceNew) {
+      await setDoc(doc(db, "locacoes", updateExistingId), {
+        ...locDoc,
+        createdAt: imovel._existingRentalCreatedAt || locDoc.createdAt
+      }, { merge: true });
+    } else {
+      const resRef = await addDoc(collection(db, "locacoes"), locDoc);
+      rentalId = resRef.id;
+    }
+
+    const fullLocacaoObj = { ...locDoc, id: rentalId };
+    await createFinancialEntryFromRental(fullLocacaoObj);
+
+    return rentalId;
+  };
+
+  const createFinancialEntryFromRental = async (locacao: any) => {
+    const rentalValue = Number(locacao.valorAluguelMensal || 0);
+    const comPercent = Number(locacao.percentualComissao || 0);
+    const comValue = rentalValue * (comPercent / 100);
+
+    const qFin = query(
+      collection(db, "financeiro"),
+      where("locacaoId", "==", String(locacao.id)),
+      where("status", "==", "Pendente")
+    );
+    const snapFin = await getDocs(qFin);
+
+    const today = new Date();
+    const competenciaMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    
+    const vencDay = parseInt(locacao.diaVencimento || "10", 10) || 10;
+    const vencDate = new Date();
+    vencDate.setDate(vencDay);
+    if (vencDate < today) {
+      vencDate.setMonth(vencDate.getMonth() + 1);
+    }
+    const vencimentoStr = vencDate.toISOString().split('T')[0];
+
+    const payload = {
+      tipo: "Receita",
+      categoria: "Comissão de Locação",
+      origem: "locacao",
+      locacaoId: String(locacao.id),
+      imovelId: String(locacao.imovelId),
+      codigoImovel: String(locacao.codigoImovel),
+      descricao: `Comissão de locação do imóvel ${locacao.codigoImovel}`,
+      valorBase: rentalValue,
+      percentualComissao: comPercent,
+      valor: comValue,
+      status: "Pendente",
+      dataCompetencia: competenciaMonth,
+      dataVencimento: vencimentoStr,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!snapFin.empty) {
+      const existingFinId = snapFin.docs[0].id;
+      await setDoc(doc(db, "financeiro", existingFinId), {
+        ...payload,
+        createdAt: snapFin.docs[0].data().createdAt || payload.createdAt
+      }, { merge: true });
+    } else {
+      await addDoc(collection(db, "financeiro"), payload);
+    }
+  };
+
+  const createAutomaticSaleFromProperty = async (imovel: any, forceNew: boolean = false, updateExistingId?: string) => {
+    const finalPrice = Number(imovel.autoValorFinalVenda || imovel.valorVenda || 0);
+    const commissionPercentage = Number(imovel.autoPercentualComissaoVenda || 6);
+    const commissionValue = finalPrice * (commissionPercentage / 100);
+
+    const saleDoc = {
+      imovelId: String(imovel.id),
+      codigoImovel: String(imovel.codigoImovel || imovel.codigo || ""),
+      compradorNome: String(imovel.autoCompradorNome || ""),
+      compradorCpfCnpj: String(imovel.autoCompradorCpfCnpj || ""),
+      compradorTelefone: String(imovel.autoCompradorTelefone || ""),
+      compradorEmail: String(imovel.autoCompradorEmail || ""),
+      dataVenda: String(imovel.autoDataVenda || new Date().toISOString().split('T')[0]),
+      valorFinalVenda: finalPrice,
+      percentualComissao: commissionPercentage,
+      valorComissao: commissionValue,
+      formaPagamento: String(imovel.autoFormaPagamento || "À Vista"),
+      status: "Concluída",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    let saleId = updateExistingId;
+    if (updateExistingId && !forceNew) {
+      await setDoc(doc(db, "vendas", updateExistingId), {
+        ...saleDoc,
+        createdAt: imovel._existingSaleCreatedAt || saleDoc.createdAt
+      }, { merge: true });
+    } else {
+      const resRef = await addDoc(collection(db, "vendas"), saleDoc);
+      saleId = resRef.id;
+    }
+
+    const fullSaleObj = { ...saleDoc, id: saleId };
+    await createFinancialEntryFromSale(fullSaleObj);
+
+    return saleId;
+  };
+
+  const createFinancialEntryFromSale = async (venda: any) => {
+    const finalPrice = Number(venda.valorFinalVenda || 0);
+    const comPercent = Number(venda.percentualComissao || 0);
+    const comValue = finalPrice * (comPercent / 100);
+
+    const qFin = query(
+      collection(db, "financeiro"),
+      where("vendaId", "==", String(venda.id)),
+      where("status", "==", "Pendente")
+    );
+    const snapFin = await getDocs(qFin);
+
+    const competenciaMonth = venda.dataVenda ? venda.dataVenda.substring(0, 7) : new Date().toISOString().substring(0, 7);
+
+    const payload = {
+      tipo: "Receita",
+      categoria: "Comissão de Venda",
+      origem: "venda",
+      vendaId: String(venda.id),
+      imovelId: String(venda.imovelId),
+      codigoImovel: String(venda.codigoImovel),
+      descricao: `Comissão de venda do imóvel ${venda.codigoImovel}`,
+      valorBase: finalPrice,
+      percentualComissao: comPercent,
+      valor: comValue,
+      status: "Pendente",
+      dataCompetencia: competenciaMonth,
+      dataVencimento: venda.dataVenda || new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!snapFin.empty) {
+      const existingFinId = snapFin.docs[0].id;
+      await setDoc(doc(db, "financeiro", existingFinId), {
+        ...payload,
+        createdAt: snapFin.docs[0].data().createdAt || payload.createdAt
+      }, { merge: true });
+    } else {
+      await addDoc(collection(db, "financeiro"), payload);
+    }
+  };
+
+  const [duplicationWarning, setDuplicationWarning] = useState<any | null>(null);
+
   const [showSuccess, setShowSuccess] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
   const [loadingGeo, setLoadingGeo] = useState(false);
@@ -2523,6 +2898,22 @@ export default function OwnerPortal({
     descricaoSEO: '',
     palavrasChaveSEO: ''
   });
+
+  const [codigoPreview, setCodigoPreview] = useState<string>('');
+
+  useEffect(() => {
+    if (editingId === null && (newProperty.type || newProperty.propertyType)) {
+      const tipo = newProperty.type || newProperty.propertyType || "Casa";
+      obterPreviaCodigoImovel(tipo).then(res => {
+        setCodigoPreview(res);
+        setNewProperty((prev: any) => ({
+          ...prev,
+          codigoImovel: res,
+          codigo: res
+        }));
+      });
+    }
+  }, [newProperty.type, newProperty.propertyType, editingId]);
 
   const getCodigoPublicoImovel = (p: Property) => {
     return p.codigoImovel || p.id;
@@ -2719,6 +3110,13 @@ export default function OwnerPortal({
       setPriceError(null);
     }
 
+    if (newProperty.corretorId) {
+      if (!newProperty.corretorNome || (!newProperty.corretorWhatsapp && !newProperty.corretorTelefone)) {
+        alert("Se selecionar um corretor responsável, você deve fornecer pelo menos o Nome e o WhatsApp ou Telefone do corretor.");
+        return;
+      }
+    }
+
     const priceVal = businessType === 'Locação' ? Number(newProperty.valorAluguel || 0) : Number(newProperty.valorVenda || 0);
 
     setIsSubmitting(true);
@@ -2795,9 +3193,49 @@ export default function OwnerPortal({
       
       if (isAuthorized) {
         if (editingId !== null) {
-          onUpdateProperty({ ...propertyData, id: editingId } as Property);
+          if (newProperty.status === "Alugado") {
+            const activeLoc = await checkExistingActiveRental(editingId);
+            if (activeLoc) {
+              setDuplicationWarning({
+                type: 'rental',
+                propertyId: editingId,
+                propertyData,
+                existingRecord: activeLoc
+              });
+              setIsSubmitting(false);
+              return;
+            }
+          } else if (newProperty.status === "Vendido") {
+            const activeSale = await checkExistingSale(editingId);
+            if (activeSale) {
+              setDuplicationWarning({
+                type: 'sale',
+                propertyId: editingId,
+                propertyData,
+                existingRecord: activeSale
+              });
+              setIsSubmitting(false);
+              return;
+            }
+          }
+
+          await onUpdateProperty({ ...propertyData, id: editingId } as Property);
+          
+          if (newProperty.status === "Alugado") {
+            await createAutomaticRentalFromProperty({ ...propertyData, id: editingId }, true);
+          } else if (newProperty.status === "Vendido") {
+            await createAutomaticSaleFromProperty({ ...propertyData, id: editingId }, true);
+          }
         } else {
-          onAddProperty(propertyData);
+          const res = await (onAddProperty as any)(propertyData);
+          if (res && res.success && res.id) {
+            const newId = res.id;
+            if (newProperty.status === "Alugado") {
+              await createAutomaticRentalFromProperty({ ...propertyData, id: newId }, true);
+            } else if (newProperty.status === "Vendido") {
+              await createAutomaticSaleFromProperty({ ...propertyData, id: newId }, true);
+            }
+          }
         }
         setShowSuccess(true);
         return;
@@ -3057,7 +3495,89 @@ export default function OwnerPortal({
       palavrasChaveSEO: property.palavrasChaveSEO || '',
 
       status: property.status === 'ativo' ? 'Disponível' : (property.status === 'inativo' ? 'Inativo' : property.status || 'Disponível'),
+      statusImovel: property.status === 'ativo' ? 'Disponível' : (property.status === 'inativo' ? 'Inativo' : property.status || 'Disponível'),
+
+      autoLocatarioNome: (property as any).autoLocatarioNome || (property.gestaoLocacao as any)?.locatarioNome || '',
+      autoLocatarioCpfCnpj: (property as any).autoLocatarioCpfCnpj || (property.gestaoLocacao as any)?.locatarioCpfCnpj || '',
+      autoLocatarioTelefone: (property as any).autoLocatarioTelefone || (property.gestaoLocacao as any)?.locatarioWhatsapp || '',
+      autoLocatarioEmail: (property as any).autoLocatarioEmail || (property.gestaoLocacao as any)?.locatarioEmail || '',
+      autoDataInicio: (property as any).autoDataInicio || (property.gestaoLocacao as any)?.dataInicioLocacao || '',
+      autoDataFim: (property as any).autoDataFim || (property.gestaoLocacao as any)?.dataFimLocacao || '',
+      autoDiaVencimento: (property as any).autoDiaVencimento || (property.gestaoLocacao as any)?.diaVencimentoAluguel || '10',
+      autoValorAluguelMensal: (property as any).autoValorAluguelMensal || (property.gestaoLocacao as any)?.valorAluguelContratado || property.valorAluguel || 0,
+      autoValorCondominio: (property as any).autoValorCondominio || (property.gestaoLocacao as any)?.valorCondominio || property.valorCondominio || 0,
+      autoValorIptu: (property as any).autoValorIptu || (property.gestaoLocacao as any)?.valorIptu || property.valorIptuAnual || 0,
+      autoTaxaLixo: (property as any).autoTaxaLixo || (property.gestaoLocacao as any)?.taxaLixo || property.taxaLixoAnual || 0,
+      autoTaxaAgua: (property as any).autoTaxaAgua || (property.gestaoLocacao as any)?.taxaAgua || 0,
+      autoTaxaLuz: (property as any).autoTaxaLuz || (property.gestaoLocacao as any)?.taxaLuz || 0,
+      autoTaxaGas: (property as any).autoTaxaGas || (property.gestaoLocacao as any)?.taxaGas || 0,
+      autoSeguroIncendio: (property as any).autoSeguroIncendio || (property.gestaoLocacao as any)?.seguroIncendio || 0,
+      autoPercentualComissao: (property as any).autoPercentualComissao || (property.gestaoLocacao as any)?.comissaoImobiliariaPercentual || 10,
+      autoObservacoesLocacao: (property as any).autoObservacoesLocacao || (property.gestaoLocacao as any)?.observacoesLocacao || '',
+
+      autoCompradorNome: (property as any).autoCompradorNome || '',
+      autoCompradorCpfCnpj: (property as any).autoCompradorCpfCnpj || '',
+      autoCompradorTelefone: (property as any).autoCompradorTelefone || '',
+      autoCompradorEmail: (property as any).autoCompradorEmail || '',
+      autoDataVenda: (property as any).autoDataVenda || '',
+      autoValorFinalVenda: (property as any).autoValorFinalVenda || property.valorVenda || 0,
+      autoPercentualComissaoVenda: (property as any).autoPercentualComissaoVenda || 6,
+      autoValorComissaoVenda: (property as any).autoValorComissaoVenda || 0,
+      autoFormaPagamento: (property as any).autoFormaPagamento || 'À Vista',
+      autoObservacoesVenda: (property as any).autoObservacoesVenda || '',
+      autoObservacoesReserva: (property as any).autoObservacoesReserva || (property as any).observacoesReserva || '',
     });
+
+    // Load active logs asynchronously
+    if (property.id) {
+      if (property.status === "Alugado" || (property as any).statusImovel === "Alugado") {
+        checkExistingActiveRental(String(property.id)).then((active: any) => {
+          if (active) {
+            setNewProperty((prev: any) => ({
+              ...prev,
+              autoLocatarioNome: active.locatarioNome || prev.autoLocatarioNome,
+              autoLocatarioCpfCnpj: active.locatarioCpfCnpj || prev.autoLocatarioCpfCnpj,
+              autoLocatarioTelefone: active.locatarioTelefone || prev.autoLocatarioTelefone,
+              autoLocatarioEmail: active.locatarioEmail || prev.autoLocatarioEmail,
+              autoDataInicio: active.dataInicio || prev.autoDataInicio,
+              autoDataFim: active.dataFim || prev.autoDataFim,
+              autoDiaVencimento: active.diaVencimento || prev.autoDiaVencimento,
+              autoValorAluguelMensal: active.valorAluguelMensal || prev.autoValorAluguelMensal,
+              autoValorCondominio: active.valorCondominio || prev.autoValorCondominio,
+              autoValorIptu: active.valorIptu || prev.autoValorIptu,
+              autoTaxaLixo: active.taxaLixo || prev.autoTaxaLixo,
+              autoTaxaAgua: active.taxaAgua || prev.autoTaxaAgua,
+              autoTaxaLuz: active.taxaLuz || prev.autoTaxaLuz,
+              autoTaxaGas: active.taxaGas || prev.autoTaxaGas,
+              autoSeguroIncendio: active.seguroIncendio || prev.autoSeguroIncendio,
+              autoPercentualComissao: active.percentualComissao || prev.autoPercentualComissao,
+              autoObservacoesLocacao: active.observacoesLocacao || prev.autoObservacoesLocacao,
+              _existingRentalCreatedAt: active.createdAt
+            }));
+          }
+        });
+      } else if (property.status === "Vendido" || (property as any).statusImovel === "Vendido") {
+        checkExistingSale(String(property.id)).then((active: any) => {
+          if (active) {
+            setNewProperty((prev: any) => ({
+              ...prev,
+              autoCompradorNome: active.compradorNome || prev.autoCompradorNome,
+              autoCompradorCpfCnpj: active.compradorCpfCnpj || prev.autoCompradorCpfCnpj,
+              autoCompradorTelefone: active.compradorTelefone || prev.autoCompradorTelefone,
+              autoCompradorEmail: active.compradorEmail || prev.autoCompradorEmail,
+              autoDataVenda: active.dataVenda || prev.autoDataVenda,
+              autoValorFinalVenda: active.valorFinalVenda || prev.autoValorFinalVenda,
+              autoPercentualComissaoVenda: active.percentualComissao || prev.autoPercentualComissaoVenda,
+              autoValorComissaoVenda: active.valorComissao || prev.autoValorComissaoVenda,
+              autoFormaPagamento: active.formaPagamento || prev.autoFormaPagamento,
+              autoObservacoesVenda: active.observacoesVenda || prev.autoObservacoesVenda,
+              _existingSaleCreatedAt: active.createdAt
+            }));
+          }
+        });
+      }
+    }
+
     setPriceError(null);
     
     // Construct robust fotos objects array for the editor
@@ -3135,6 +3655,216 @@ export default function OwnerPortal({
     };
   };
 
+  const gerarTextosPublicacaoAutomaticos = (imovel: any) => {
+    const tipo = imovel.type || imovel.tipoImovel || "Imóvel";
+    const finalidade = imovel.purpose || imovel.tipoNegocio || "Venda";
+    const cidade = imovel.cidade || imovel.city || "Sorocaba";
+    const bairro = imovel.bairro || imovel.neighborhood || "";
+    const quartos = imovel.beds ? `${imovel.beds} dormitório(s)` : "";
+    const suites = imovel.suites ? `${imovel.suites} suíte(s)` : "";
+    const banheiros = imovel.baths ? `${imovel.baths} banheiro(s)` : "";
+    const vagas = imovel.parkingCovered ? `${imovel.parkingCovered} vaga(s)` : "";
+    
+    const areaPrivativa = imovel.areaUseful || imovel.area || "";
+    const areaTotal = imovel.areaTotal || "";
+    const areaConstruida = imovel.areaConstruida || "";
+    const areaTerreno = imovel.areaTerreno || "";
+
+    const valorVenda = imovel.valorVenda ? `R$ ${Number(imovel.valorVenda).toLocaleString('pt-BR')}` : "";
+    const valorAluguel = imovel.valorAluguel ? `R$ ${Number(imovel.valorAluguel).toLocaleString('pt-BR')}` : "";
+    const valorCondominio = imovel.valorCondominio ? `R$ ${Number(imovel.valorCondominio).toLocaleString('pt-BR')}` : "";
+    const valorIptuAnual = imovel.valorIptuAnual ? `R$ ${Number(imovel.valorIptuAnual).toLocaleString('pt-BR')}` : "";
+    
+    const locStr = bairro ? `${bairro} em ${cidade}` : cidade;
+    const codigo = imovel.codigoImovel || imovel.codigo || imovel.id || "";
+
+    // 1. Título do anúncio
+    let tit = `${tipo} para ${finalidade === "Locação" ? "aluguel" : "venda"}`;
+    if (bairro) tit += ` no ${bairro}`;
+    tit += ` em ${cidade}`;
+    if (imovel.beds) tit += ` com ${imovel.beds} dorms`;
+    if (imovel.suites) tit += ` e ${imovel.suites} suíte(s)`;
+
+    // 2. Subtítulo
+    let subtit = "Excelente oportunidade ";
+    if (finalidade === "Locação") {
+      subtit += "para locação ";
+    } else if (finalidade === "Venda") {
+      subtit += "para venda ";
+    } else {
+      subtit += "para morar ou investir ";
+    }
+    if (bairro) subtit += `no bairro ${bairro}. `;
+    subtit += "Conforto, localização extremamente estratégica e excelente infraestrutura.";
+
+    // 3. Descrição curta
+    let descCurta = `Ótima oportunidade de ${tipo} disponível para ${finalidade} no ${locStr}. `;
+    const listSpecs = [];
+    if (quartos) listSpecs.push(quartos);
+    if (suites) listSpecs.push(suites);
+    if (vagas) listSpecs.push(vagas);
+    if (areaPrivativa) listSpecs.push(`${areaPrivativa}m² de área privativa`);
+    if (listSpecs.length > 0) {
+      descCurta += `O imóvel conta com ${listSpecs.join(", ")}, oferecendo uma distribuição de espaço confortável e inteligente. `;
+    }
+    descCurta += `Excelente custo-benefício para a região. Entre em contato conosco!`;
+
+    // 4. Descrição detalhada
+    let descDetalhada = `Apresentamos esta excelente oportunidade de ${tipo} para ${finalidade} em uma das regiões de maior procura. `;
+    if (bairro) descDetalhada += `Situado no cobiçado bairro ${bairro}, em ${cidade}, o imóvel destaca-se pela facilidade de acesso a serviços e conveniências locais.\n\n`;
+    else descDetalhada += `Situado em ${cidade}, o imóvel destaca-se pela excelente localização e facilidade de acesso.\n\n`;
+
+    descDetalhada += `**Estrutura do Imóvel & Ambientes**\n`;
+    descDetalhada += `Com ambientes bem arejados e excelente iluminação natural, esta propriedade dispõe de:\n`;
+    if (quartos) descDetalhada += `- ${quartos}\n`;
+    if (suites) descDetalhada += `- ${suites}\n`;
+    if (banheiros) descDetalhada += `- ${banheiros}\n`;
+    if (imovel.lavabos) descDetalhada += `- ${imovel.lavabos} lavabo(s)\n`;
+    if (imovel.salas) descDetalhada += `- ${imovel.salas} sala(s) amplas para convivência\n`;
+    if (vagas) descDetalhada += `- ${vagas} de garagem\n`;
+    
+    if (areaPrivativa || areaTotal || areaConstruida || areaTerreno) {
+      descDetalhada += `\n**Metragens:**\n`;
+      if (areaPrivativa) descDetalhada += `- Área Privativa: ${areaPrivativa} m²\n`;
+      if (areaTotal) descDetalhada += `- Área Total: ${areaTotal} m²\n`;
+      if (areaConstruida) descDetalhada += `- Área Construída: ${areaConstruida} m²\n`;
+      if (areaTerreno) descDetalhada += `- Área do Terreno: ${areaTerreno} m²\n`;
+    }
+
+    // Characteristics & Arrays
+    const caracList = Array.isArray(imovel.caracteristicas) ? imovel.caracteristicas : [];
+    const ambList = Array.isArray(imovel.ambientes) ? imovel.ambientes : [];
+    const proxList = Array.isArray(imovel.proximidades) ? imovel.proximidades : [];
+    const lazList = Array.isArray(imovel.lazer) ? imovel.lazer : [];
+    const acabList = Array.isArray(imovel.acabamentos) ? imovel.acabamentos : [];
+    const instList = Array.isArray(imovel.instalacoes) ? imovel.instalacoes : [];
+
+    const extractLabels = (list: any[]) => list.map(item => {
+      if (!item) return '';
+      if (typeof item === 'object') {
+        return item.nome || item.label || '';
+      }
+      return String(item);
+    }).filter(Boolean);
+    
+    const labelsCarac = extractLabels(caracList);
+    const labelsAmb = extractLabels(ambList);
+    const labelsProx = extractLabels(proxList);
+    const labelsLaz = extractLabels(lazList);
+    const labelsAcab = extractLabels(acabList);
+    const labelsInst = extractLabels(instList);
+
+    if (labelsCarac.length > 0) {
+      descDetalhada += `\n**Características Gerais:**\n`;
+      labelsCarac.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+    if (labelsAmb.length > 0) {
+      descDetalhada += `\n**Ambientes Integrados:**\n`;
+      labelsAmb.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+    if (labelsLaz.length > 0) {
+      descDetalhada += `\n**Lazer e Condomínio:**\n`;
+      labelsLaz.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+    if (labelsAcab.length > 0) {
+      descDetalhada += `\n**Acabamento:**\n`;
+      labelsAcab.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+    if (labelsInst.length > 0) {
+      descDetalhada += `\n**Instalações:**\n`;
+      labelsInst.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+    if (labelsProx.length > 0) {
+      descDetalhada += `\n**Proximidades:**\n`;
+      labelsProx.forEach(l => { descDetalhada += `- ${l}\n`; });
+    }
+
+    descDetalhada += `\n**Condições Comerciais:**\n`;
+    if (valorVenda && (finalidade === 'Venda' || finalidade === 'Venda e Locação')) {
+      descDetalhada += `- Venda: ${valorVenda}\n`;
+    }
+    if (valorAluguel && (finalidade === 'Locação' || finalidade === 'Venda e Locação')) {
+      descDetalhada += `- Aluguel: ${valorAluguel}/mês\n`;
+    }
+    if (valorCondominio) descDetalhada += `- Condomínio: ${valorCondominio}/mês\n`;
+    if (valorIptuAnual) descDetalhada += `- IPTU Anual: ${valorIptuAnual}\n`;
+    
+    if (imovel.aceitaFinanciamento) descDetalhada += `- Aceita Financiamento Bancário\n`;
+    if (imovel.aceitaFGTS) descDetalhada += `- Aceita uso de FGTS\n`;
+    if (imovel.aceitaPermuta) descDetalhada += `- Estuda Permuta\n`;
+    if (imovel.eMobiliado || imovel.mobiliado) descDetalhada += `- Unidade Mobiliada\n`;
+    if (imovel.imovelAlugado) descDetalhada += `- Imóvel Atualmente Alugado (Excelente para Investidor)\n`;
+
+    // 5. Diferenciais em destaque
+    let difs = "";
+    if (bairro) difs += `- Localização privilegiada no bairro ${bairro}\n`;
+    else difs += `- Ótima localização em ${cidade}\n`;
+    if (suites) difs += `- Dispõe de suíte privativa para maior conforto\n`;
+    if (vagas) difs += `- Excelente espaço de garagem (${vagas})\n`;
+    if (imovel.aceitaFinanciamento) difs += `- Documentação regularizada, aceita financiamento\n`;
+    if (labelsCarac.length > 0) {
+      labelsCarac.slice(0, 3).forEach(l => {
+        difs += `- ${l}\n`;
+      });
+    }
+
+    // 6. Texto para WhatsApp
+    let txtWhats = `Olá! Tenho interesse no imóvel ${codigo ? `${codigo} - ` : ""}${tit}. Gostaria de obter mais informações, tirar dúvidas e agendar uma visita.`;
+
+    // 7. Legenda Instagram
+    let txtInsta = `🔑 EXCELENTE OPORTUNIDADE EM SOROCABA!\n\nProcurando por conforto, praticidade e uma localização privilegiada? Conheça este incrível ${tipo.toLowerCase()} para ${finalidade.toLowerCase()} `;
+    if (bairro) txtInsta += `no ${bairro} em ${cidade}`;
+    else txtInsta += `em ${cidade}`;
+    txtInsta += `!\n\n`;
+    if (quartos) txtInsta += `🛏️ ${quartos}\n`;
+    if (suites) txtInsta += `🚿 ${suites}\n`;
+    if (vagas) txtInsta += `🚗 ${vagas}\n`;
+    if (areaPrivativa) txtInsta += `📐 ${areaPrivativa} m² privativos\n`;
+    txtInsta += `\n✨ Diferenciais:\n${difs.substring(0, 150)}...\n\n`;
+    txtInsta += `Ficou interessado(a)? Não perca tempo e venha conferir cada detalhe com a nossa equipe!\n\n📥 Entre em contato via Direct ou WhatsApp e agende sua visita com a RB Sorocaba Negócios Imobiliários!\n\n#rbsorocaba #sorocaba #imobiliaria #imoveis #seuimovel`;
+    if (bairro) txtInsta += ` #${bairro.toLowerCase().replace(/\s+/g, '')}`;
+    txtInsta += ` #${tipo.toLowerCase().replace(/\s+/g, '')}`;
+
+    // 8. Título SEO
+    let titSEO = `${tipo} para ${finalidade} `;
+    if (bairro) titSEO += `no ${bairro} `;
+    titSEO += `em ${cidade} | RB Sorocaba`;
+    if (titSEO.length > 60) titSEO = titSEO.substring(0, 57) + "...";
+
+    // 9. Meta descrição SEO
+    let descSEO = `${tipo} para ${finalidade.toLowerCase()} `;
+    if (bairro) descSEO += `no bairro ${bairro} `;
+    descSEO += `em ${cidade}. `;
+    if (quartos) descSEO += `${quartos}, `;
+    if (vagas) descSEO += `${vagas}. `;
+    descSEO += "Conheça agora essa excelente oportunidade comercial!";
+    if (descSEO.length > 160) descSEO = descSEO.substring(0, 157) + "...";
+
+    // 10. Palavras-chave SEO
+    const keywords = [];
+    keywords.push(`${tipo.toLowerCase()} em sorocaba`);
+    if (bairro) {
+      keywords.push(`${tipo.toLowerCase()} no ${bairro.toLowerCase()}`);
+      keywords.push(`imovel no ${bairro.toLowerCase()}`);
+    }
+    keywords.push(`imoveis rb sorocaba`);
+    keywords.push(`${tipo.toLowerCase()} para ${finalidade.toLowerCase()}`);
+    const kwSEO = keywords.join(", ");
+
+    return {
+      tituloAnuncio: tit,
+      subtituloAnuncio: subtit,
+      descricaoCurta: descCurta,
+      descricaoDetalhada: descDetalhada,
+      diferenciaisAnuncio: difs,
+      textoWhatsapp: txtWhats,
+      textoInstagram: txtInsta,
+      tituloSEO: titSEO,
+      descricaoSEO: descSEO,
+      palavrasChaveSEO: kwSEO
+    };
+  };
+
   const handleGeminiGenerate = async () => {
     if (isGeneratingIA) return;
     setIsGeneratingIA(true);
@@ -3151,8 +3881,7 @@ export default function OwnerPortal({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Erro desconhecido ao gerar textos com o Gemini.");
+        throw new Error("Falha ao comunicar com o servidor do Gemini.");
       }
 
       const data = await response.json();
@@ -3160,9 +3889,12 @@ export default function OwnerPortal({
       setNewProperty(prev => ({
         ...prev,
         tituloAnuncio: data.tituloAnuncio || prev.tituloAnuncio || '',
+        title: data.tituloAnuncio || prev.title || '',
         subtituloAnuncio: data.subtituloAnuncio || prev.subtituloAnuncio || '',
         descricaoCurta: data.descricaoCurta || prev.descricaoCurta || '',
+        shortDescription: data.descricaoCurta || prev.shortDescription || '',
         descricaoDetalhada: data.descricaoDetalhada || prev.descricaoDetalhada || '',
+        description: data.descricaoDetalhada || prev.description || '',
         diferenciaisAnuncio: data.diferenciaisAnuncio || prev.diferenciaisAnuncio || '',
         textoWhatsapp: data.textoWhatsapp || prev.textoWhatsapp || '',
         textoInstagram: data.textoInstagram || prev.textoInstagram || '',
@@ -3171,11 +3903,34 @@ export default function OwnerPortal({
         palavrasChaveSEO: data.palavrasChaveSEO || prev.palavrasChaveSEO || ''
       }));
 
-      setIaSuccessMessage("Todos os textos do anúncio e SEO foram gerados com sucesso pelo Gemini AI!");
+      setIaSuccessMessage("Textos gerados com sucesso.");
       setTimeout(() => setIaSuccessMessage(null), 5000);
     } catch (error: any) {
-      console.error("Gemini Generation Error:", error);
-      setIaErrorMessage(error.message || "Ocorreu uma falha ao comunicar com o Assistente de Inteligência Artificial.");
+      console.warn("Gemini generation failed, running expert local dynamic fallback generator:", error);
+      try {
+        const localData = gerarTextosPublicacaoAutomaticos(newProperty);
+        setNewProperty(prev => ({
+          ...prev,
+          tituloAnuncio: localData.tituloAnuncio || prev.tituloAnuncio || '',
+          title: localData.tituloAnuncio || prev.title || '',
+          subtituloAnuncio: localData.subtituloAnuncio || prev.subtituloAnuncio || '',
+          descricaoCurta: localData.descricaoCurta || prev.descricaoCurta || '',
+          shortDescription: localData.descricaoCurta || prev.shortDescription || '',
+          descricaoDetalhada: localData.descricaoDetalhada || prev.descricaoDetalhada || '',
+          description: localData.descricaoDetalhada || prev.description || '',
+          diferenciaisAnuncio: localData.diferenciaisAnuncio || prev.diferenciaisAnuncio || '',
+          textoWhatsapp: localData.textoWhatsapp || prev.textoWhatsapp || '',
+          textoInstagram: localData.textoInstagram || prev.textoInstagram || '',
+          tituloSEO: localData.tituloSEO || prev.tituloSEO || '',
+          descricaoSEO: localData.descricaoSEO || prev.descricaoSEO || '',
+          palavrasChaveSEO: localData.palavrasChaveSEO || prev.palavrasChaveSEO || ''
+        }));
+        setIaSuccessMessage("Textos gerados com sucesso.");
+        setTimeout(() => setIaSuccessMessage(null), 5000);
+      } catch (localErr: any) {
+        console.error("Local generator also failed:", localErr);
+        setIaErrorMessage("Erro ao gerar textos. Tente novamente.");
+      }
     } finally {
       setIsGeneratingIA(false);
     }
@@ -4054,7 +4809,13 @@ export default function OwnerPortal({
                                   </button>
                                 </div>
                                 <button
-                                  onClick={() => setViewingProperty(p)}
+                                  onClick={() => {
+                                    if (onViewFichaTecnica) {
+                                      onViewFichaTecnica(p);
+                                    } else {
+                                      setViewingProperty(p);
+                                    }
+                                  }}
                                   className="w-full py-3 bg-[#050505] text-white hover:bg-[#F5B400] hover:text-[#050505] rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-305 flex items-center justify-center gap-2 cursor-pointer shadow-sm border border-[#050505]"
                                 >
                                   <Eye size={14} className="text-[#F5B400] group-hover:text-black shrink-0" />
@@ -5284,7 +6045,7 @@ export default function OwnerPortal({
                     <button
                       onClick={() => {
                         setEditingBroker(null);
-                        setFormBroker({ nome: '', creci: '', telefone: '', email: '', fotoUrl: '', ativo: true });
+                        setFormBroker({ nome: '', creci: '', telefone: '', whatsapp: '', email: '', fotoUrl: '', foto: '', ativo: true });
                         setIsBrokerModalOpen(true);
                       }}
                       className="bg-[#050505] text-amber-500 hover:bg-[#121212] hover:text-amber-400 border border-neutral-900 px-6 py-3 rounded-lg text-[10px] font-extrabold uppercase tracking-widest flex items-center gap-2 transition-all shadow"
@@ -5305,7 +6066,7 @@ export default function OwnerPortal({
                       <button
                         onClick={() => {
                           setEditingBroker(null);
-                          setFormBroker({ nome: 'Corretor Demonstrativo', creci: 'CRECI 99999-F', telefone: '(15) 99123-4567', email: 'vendas@rbsorocaba.com.br', fotoUrl: '', ativo: true });
+                          setFormBroker({ nome: 'Corretor Demonstrativo', creci: 'CRECI 99999-F', telefone: '(15) 99123-4567', whatsapp: '(15) 99123-4567', email: 'vendas@rbsorocaba.com.br', fotoUrl: '', foto: '', ativo: true });
                           setIsBrokerModalOpen(true);
                         }}
                         className="text-amber-500 hover:text-amber-600 text-xs font-black uppercase tracking-widest"
@@ -5319,8 +6080,8 @@ export default function OwnerPortal({
                         <div key={broker.id} className="bg-white border border-[#EFEFEA] rounded-2xl shadow-sm hover:shadow-md overflow-hidden relative group transition-all duration-200">
                           <div className="p-6 flex items-start space-x-4">
                             <div className="w-16 h-16 rounded-full bg-stone-100 border border-[#EFEFEA] flex items-center justify-center font-black text-stone-400 text-xl overflow-hidden shrink-0">
-                              {broker.fotoUrl ? (
-                                <img src={broker.fotoUrl} alt={broker.nome} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              {(broker.fotoUrl || broker.foto) ? (
+                                <img src={broker.fotoUrl || broker.foto} alt={broker.nome} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                               ) : (
                                 (broker.nome || "C").charAt(0).toUpperCase()
                               )}
@@ -5336,6 +6097,7 @@ export default function OwnerPortal({
                               
                               <div className="text-[10px] text-zinc-500 space-y-0.5 font-medium">
                                 <p className="truncate">📞 {broker.telefone || "Telefone não cadastrado"}</p>
+                                {broker.whatsapp && <p className="truncate">💬 {broker.whatsapp}</p>}
                                 <p className="truncate">✉️ {broker.email || "E-mail corporativo"}</p>
                               </div>
                             </div>
@@ -5349,8 +6111,10 @@ export default function OwnerPortal({
                                   nome: broker.nome || "",
                                   creci: broker.creci || "",
                                   telefone: broker.telefone || "",
+                                  whatsapp: broker.whatsapp || broker.whatsApp || "",
                                   email: broker.email || "",
-                                  fotoUrl: broker.fotoUrl || "",
+                                  fotoUrl: broker.fotoUrl || broker.foto || "",
+                                  foto: broker.foto || broker.fotoUrl || "",
                                   ativo: broker.ativo !== undefined ? broker.ativo : true
                                 });
                                 setIsBrokerModalOpen(true);
@@ -6116,7 +6880,8 @@ export default function OwnerPortal({
                               { id: 'tiposImovel', label: 'Tipos de Imóvel' },
                               { id: 'tiposNegocio', label: 'Tipos de Negócio' },
                               { id: 'statusImovel', label: 'Status de Cadastro' },
-                              { id: 'faixasPreco', label: 'Faixas de Preço de Sorocaba' }
+                              { id: 'faixasPreco', label: 'Faixas de Preço de Sorocaba' },
+                              { id: 'categoriasImovel', label: 'Categorias do Imóvel' }
                             ].map(tab => (
                               <button
                                 key={tab.id}
@@ -6159,6 +6924,13 @@ export default function OwnerPortal({
                               collectionName="faixasPreco" 
                               title="Faixas de Preço" 
                               description="Intervalos de valor para orientar filtros rápidos e barras de pesquisa." 
+                            />
+                          )}
+                          {activeOptionsTab === 'categoriasImovel' && (
+                            <ConfigOptionManager 
+                              collectionName="categoriasImovel" 
+                              title="Categorias do Imóvel" 
+                              description="Controla as categorias principais do imóvel. Ex: Residencial, Comercial, Rural, Terreno, Industrial." 
                             />
                           )}
                         </div>
@@ -6223,6 +6995,44 @@ export default function OwnerPortal({
                               <p className="text-[10px] text-[#A1A1AA] font-bold uppercase tracking-widest mt-0.5">Gestão das opções de infraestrutura e itens de lazer nas listagens</p>
                             </div>
                             <span className="text-[8px] bg-green-50 text-green-700 px-3 py-1.5 border border-green-200 uppercase tracking-widest font-black rounded-lg">Real-Time</span>
+                          </div>
+
+                          {/* Seeding Button / Sync Bank */}
+                          <div className="bg-amber-50/50 border border-amber-200/60 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                            <div className="space-y-1">
+                              <h5 className="text-[11px] font-black uppercase text-amber-900 tracking-wider">Sincronização de Opções Profissionais</h5>
+                              <p className="text-[10px] text-amber-700 font-medium">
+                                Alimente as coleções de Características, Ambientes, Proximidades, Instalações, Acabamentos, Lazer, Tipos e Categorias com um banco completo de Sorocaba com mais de 100 opções. 
+                                <span className="font-bold underline ml-1">Obs: Itens existentes não serão duplicados.</span>
+                              </p>
+                              {seedReport && (
+                                <span className="block text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 border border-emerald-200 rounded-lg max-w-max mt-2">
+                                  Último relatório de adições: {Object.entries(seedReport.counts).map(([col, n]) => `${col}: +${n}`).join(", ") || "Nenhum item novo adicionado"}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleSeedOptions}
+                              disabled={isSeeding}
+                              className={`shrink-0 flex items-center justify-center space-x-2 px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider border transition-all ${
+                                isSeeding
+                                  ? 'bg-amber-100 text-amber-400 border-amber-200 cursor-not-allowed'
+                                  : 'bg-amber-500 hover:bg-amber-600 text-stone-900 border-amber-600 shadow-[0_4px_12px_rgba(245,158,11,0.2)] active:scale-95'
+                              }`}
+                            >
+                              {isSeeding ? (
+                                <>
+                                  <div className="w-4 h-4 border-2 border-stone-800 border-t-transparent rounded-full animate-spin"></div>
+                                  <span>Sincronizando Banco...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles size={14} className="animate-pulse" />
+                                  <span>Sincronizar Opções Padrão</span>
+                                </>
+                              )}
+                            </button>
                           </div>
 
                           {/* Selection filters tabs */}
@@ -6565,67 +7375,77 @@ export default function OwnerPortal({
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-1">
-                              <label className="text-[9px] font-black uppercase text-stone-600">Título do Anúncio *</label>
-                              <input type="text" placeholder="Ex: Maravilhoso Sobrado Triplex" required
+                              <label className="text-[9px] font-black uppercase text-stone-600">Categoria *</label>
+                              <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-800"
+                                value={newProperty.category} onChange={e => setNewProperty({...newProperty, category: e.target.value as any})}>
+                                {opcoesCategoriasImovel.map((c: any) => (
+                                  <option key={c.id || c.value} value={c.nome || c.label}>{c.nome || c.label}</option>
+                                ))}
+                                {opcoesCategoriasImovel.length === 0 && (
+                                  <>
+                                    <option value="Residencial">Residencial</option>
+                                    <option value="Comercial">Comercial</option>
+                                    <option value="Rural">Rural</option>
+                                  </>
+                                )}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black uppercase text-stone-600">Tipo de Imóvel *</label>
+                              <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-800"
+                                value={newProperty.type || newProperty.propertyType} 
+                                onChange={e => setNewProperty({...newProperty, type: e.target.value, propertyType: e.target.value})}>
+                                {opcoesTiposImovel.map((t: any) => (
+                                  <option key={t.id || t.value} value={t.nome || t.label}>{t.nome || t.label}</option>
+                                ))}
+                                {opcoesTiposImovel.length === 0 && (
+                                  <>
+                                    {FALLBACK_TIPOS_IMOVEL.map(t => (
+                                      <option key={t.id} value={t.nome}>{t.nome}</option>
+                                    ))}
+                                    {optTiposImovel.map(t => (
+                                      <option key={t.id} value={t.nome}>{t.nome}</option>
+                                    ))}
+                                  </>
+                                )}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[9px] font-black uppercase text-stone-600">Código / Referência</label>
+                                <span className="text-[7.5px] font-black uppercase text-[#888880] tracking-wider leading-none">Auto-Sequencial</span>
+                              </div>
+                              <input type="text" readOnly
+                                className="w-full bg-[#EFEFEA]/50 border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-mono font-bold text-stone-600 cursor-not-allowed select-all"
+                                value={editingId !== null ? (newProperty.codigoImovel || newProperty.codigo || '') : (codigoPreview || '')}
+                                placeholder="Gerado automaticamente de forma sequencial..." />
+                              <span className="text-[8px] font-bold text-amber-600 uppercase tracking-wider block pt-0.5 font-mono">
+                                {editingId !== null ? 'Código gravado e protegido' : `Prévia dinâmica: ${codigoPreview || 'Gerando...'} se ${newProperty.type || 'Casa'}`}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black uppercase text-stone-600">Matrícula (Opcional)</label>
+                              <input type="text" placeholder="Ex: 123.456"
                                 className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-                                value={newProperty.title} onChange={e => setNewProperty({...newProperty, title: e.target.value})} />
+                                value={newProperty.matricula || ''} onChange={e => setNewProperty({...newProperty, matricula: e.target.value})} />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black uppercase text-stone-600">Categoria *</label>
-                                <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-800"
-                                  value={newProperty.category} onChange={e => setNewProperty({...newProperty, category: e.target.value as any})}>
-                                  <option value="Residencial">Residencial</option>
-                                  <option value="Comercial">Comercial</option>
-                                  <option value="Rural">Rural</option>
-                                </select>
-                              </div>
-
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black uppercase text-stone-600">Tipo de Imóvel *</label>
-                                <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-800"
-                                  value={newProperty.type || newProperty.propertyType} 
-                                  onChange={e => setNewProperty({...newProperty, type: e.target.value, propertyType: e.target.value})}>
-                                  {FALLBACK_TIPOS_IMOVEL.map(t => (
-                                    <option key={t.id} value={t.nome}>{t.nome}</option>
-                                  ))}
-                                  {optTiposImovel.map(t => (
-                                    <option key={t.id} value={t.nome}>{t.nome}</option>
-                                  ))}
-                                </select>
-                              </div>
+                            <div className="space-y-1">
+                              <label className="text-[9px] font-black uppercase text-stone-600">C.R.I. Local (Opcional)</label>
+                              <input type="text" placeholder="Ex: 2º CRI Sorocaba"
+                                className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                                value={newProperty.cri || ''} onChange={e => setNewProperty({...newProperty, cri: e.target.value})} />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black uppercase text-stone-600">Código/Referência (Opcional)</label>
-                                <input type="text" placeholder="Ex: CSO9988"
-                                  className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-                                  value={newProperty.codigoImovel || ''} onChange={e => setNewProperty({...newProperty, codigoImovel: e.target.value})} />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="text-[9px] font-black uppercase text-stone-600">Matrícula (Opcional)</label>
-                                <input type="text" placeholder="Ex: 123.456"
-                                  className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-                                  value={newProperty.matricula || ''} onChange={e => setNewProperty({...newProperty, matricula: e.target.value})} />
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="col-span-2 space-y-1">
-                                <label className="text-[9px] font-black uppercase text-stone-600">C.R.I. Local (Opcional)</label>
-                                <input type="text" placeholder="Ex: 2º CRI Sorocaba"
-                                  className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-medium"
-                                  value={newProperty.cri || ''} onChange={e => setNewProperty({...newProperty, cri: e.target.value})} />
-                              </div>
-                              <div className="flex items-end justify-center pb-2">
-                                <label className="flex items-center space-x-2 text-xs font-bold text-stone-700 cursor-pointer select-none">
-                                  <input type="checkbox" checked={!!newProperty.eEdificio} onChange={e => setNewProperty({...newProperty, eEdificio: e.target.checked})}
-                                    className="rounded border-slate-300 text-amber-500 w-4 h-4 focus:ring-amber-500" />
-                                  <span>É edifício?</span>
-                                </label>
-                              </div>
+                            <div className="flex items-end justify-start pb-3">
+                              <label className="flex items-center space-x-2 text-xs font-bold text-stone-700 cursor-pointer select-none">
+                                <input type="checkbox" checked={!!newProperty.eEdificio} onChange={e => setNewProperty({...newProperty, eEdificio: e.target.checked})}
+                                  className="rounded border-slate-300 text-[#FFD700] w-4 h-4 focus:ring-amber-500" />
+                                <span>É edifício?</span>
+                              </label>
                             </div>
 
                             {/* Condominium name toggle logic */}
@@ -6759,96 +7579,396 @@ export default function OwnerPortal({
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black uppercase text-stone-600">Finalidade do Negócio *</label>
-                              <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold"
-                                value={newProperty.purpose} 
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setNewProperty({
-                                    ...newProperty, 
-                                    purpose: val as any,
-                                    tipoNegocio: val
-                                  });
-                                }}>
-                                <option value="Venda">Venda</option>
-                                <option value="Locação">Locação</option>
-                                <option value="Venda e Locação">Venda e Locação</option>
-                              </select>
+                            <div className="col-span-full bg-[#F6F6F4] p-6 rounded-2xl border border-[#EFEFEA] space-y-6 animate-fade-in mb-4">
+                              <div className="text-[10px] font-black uppercase text-stone-900 tracking-wider pb-2 border-b border-stone-200 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-stone-900 font-extrabold">
+                                  <Shield size={12} className="text-amber-500" />
+                                  Status e Controle Comercial
+                                </span>
+                                <span className="text-[8px] bg-amber-500/10 text-amber-600 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">Automático</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                {/* Status do Imóvel */}
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-black uppercase text-stone-600">Status do Imóvel *</label>
+                                  <select 
+                                    className="w-full bg-white border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-900"
+                                    value={newProperty.status || 'Disponível'} 
+                                    onChange={e => {
+                                      const newStatus = e.target.value;
+                                      const updated = applyStatusRules(newStatus, newProperty.purpose || 'Venda', newProperty);
+                                      setNewProperty(updated);
+                                    }}
+                                  >
+                                    {opcoesStatusImovel.map((opt: string) => (
+                                      <option key={opt} value={opt}>{opt}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                {/* Finalidade do Negócio */}
+                                <div className="space-y-1">
+                                  <label className="text-[9px] font-black uppercase text-stone-600">Finalidade do Negócio *</label>
+                                  <select 
+                                    className="w-full bg-white border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold text-stone-900"
+                                    value={newProperty.purpose || 'Venda'} 
+                                    onChange={e => {
+                                      const newPurpose = e.target.value;
+                                      const updated = applyStatusRules(newProperty.status || 'Disponível', newPurpose, {
+                                        ...newProperty,
+                                        purpose: newPurpose as any,
+                                        tipoNegocio: newPurpose
+                                      });
+                                      setNewProperty(updated);
+                                    }}
+                                  >
+                                    <option value="Venda">Venda</option>
+                                    <option value="Locação">Locação</option>
+                                    <option value="Venda e Locação">Venda e Locação</option>
+                                  </select>
+                                </div>
+
+                                {/* Controls check lists */}
+                                <div className="sm:col-span-2 grid grid-cols-2 lg:grid-cols-4 gap-4 pt-3">
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5 animate-none"
+                                      checked={!!newProperty.disponivelParaVenda}
+                                      onChange={e => setNewProperty({...newProperty, disponivelParaVenda: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Disponível para Venda</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5 animate-none"
+                                      checked={!!newProperty.disponivelParaLocacao}
+                                      onChange={e => setNewProperty({...newProperty, disponivelParaLocacao: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Disponível para Locação</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5"
+                                      checked={!!newProperty.publicadoNoSite}
+                                      onChange={e => setNewProperty({...newProperty, publicadoNoSite: e.target.checked, publicado: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Publicar no Site</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5"
+                                      checked={!!newProperty.mostrarNosFiltros}
+                                      onChange={e => setNewProperty({...newProperty, mostrarNosFiltros: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Mostrar nos Filtros</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5"
+                                      checked={!!newProperty.destaqueNaHome}
+                                      onChange={e => setNewProperty({...newProperty, destaqueNaHome: e.target.checked, featured: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Destacar na Home</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5"
+                                      checked={!!newProperty.disponivelParaVisita}
+                                      onChange={e => setNewProperty({...newProperty, disponivelParaVisita: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Disponível para Visita</span>
+                                  </label>
+
+                                  <label className="flex items-center space-x-2.5 p-3.5 bg-white border border-[#EFEFEA] rounded-xl cursor-pointer hover:bg-stone-50 select-none">
+                                    <input type="checkbox" className="rounded border-zinc-300 text-amber-500 focus:ring-amber-500 h-4.5 w-4.5"
+                                      checked={!!newProperty.disponivelParaProposta}
+                                      onChange={e => setNewProperty({...newProperty, disponivelParaProposta: e.target.checked})} />
+                                    <span className="text-[10px] font-black text-stone-700 uppercase tracking-wide">Permitir Proposta</span>
+                                  </label>
+                                </div>
+                              </div>
                             </div>
 
-                            <div className="space-y-1">
-                              <label className="text-[9px] font-black uppercase text-stone-600">Status Geral do Cadastro *</label>
-                              <select className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 focus:ring-amber-500 font-bold"
-                                value={newProperty.status} onChange={e => setNewProperty({...newProperty, status: e.target.value})}>
-                                <option value="Disponível">Disponível / Ativo</option>
-                                <option value="Inativo">Inativo</option>
-                                <option value="Vendido">Vendido (Marcação overrides)</option>
-                                <option value="Reservado">Reservado</option>
-                                <option value="Rascunho">Rascunho</option>
-                              </select>
-                            </div>
+                            {/* DADOS DA LOCAÇÃO ATUAL */}
+                            {newProperty.status === 'Alugado' && (
+                              <div className="col-span-full bg-[#F6F6F4] p-6 rounded-2xl border-l-4 border-amber-500 border-y border-r border-[#EFEFEA] space-y-4 animate-fade-in mb-4">
+                                <div className="text-[10px] font-black uppercase text-stone-900 tracking-wider pb-2 border-b border-stone-200">
+                                  Dados da Locação Atual (Automação de Locação)
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">Nome do Locatário *</label>
+                                    <input type="text" required placeholder="Ex: João da Silva"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoLocatarioNome || ''} onChange={e => setNewProperty({...newProperty, autoLocatarioNome: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">CPF/CNPJ do Locatário *</label>
+                                    <input type="text" required placeholder="Ex: 000.000.000-00"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold text-[#111]"
+                                      value={newProperty.autoLocatarioCpfCnpj || ''} onChange={e => setNewProperty({...newProperty, autoLocatarioCpfCnpj: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">Telefone do Locatário *</label>
+                                    <input type="text" required placeholder="Ex: (15) 99123-4567"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold text-[#111]"
+                                      value={newProperty.autoLocatarioTelefone || ''} onChange={e => setNewProperty({...newProperty, autoLocatarioTelefone: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">E-mail do Locatário *</label>
+                                    <input type="email" required placeholder="locatario@email.com"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoLocatarioEmail || ''} onChange={e => setNewProperty({...newProperty, autoLocatarioEmail: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Início da Locação *</label>
+                                    <input type="date" required
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoDataInicio || ''} onChange={e => setNewProperty({...newProperty, autoDataInicio: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono font-semibold">Fim da Locação</label>
+                                    <input type="date"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoDataFim || ''} onChange={e => setNewProperty({...newProperty, autoDataFim: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Dia do Vencimento *</label>
+                                    <input type="number" min="1" max="31" required placeholder="Ex: 10"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold text-[#111]"
+                                      value={newProperty.autoDiaVencimento || '10'} onChange={e => setNewProperty({...newProperty, autoDiaVencimento: e.target.value})} />
+                                  </div>
+
+                                  <PercentInput
+                                    label="Comissão Imobiliária"
+                                    value={newProperty.autoPercentualComissao !== undefined ? newProperty.autoPercentualComissao : 10}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoPercentualComissao: numericValue})}
+                                    required
+                                  />
+
+                                  <CurrencyInput
+                                    label="Aluguel Mensal"
+                                    value={newProperty.autoValorAluguelMensal !== undefined ? newProperty.autoValorAluguelMensal : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoValorAluguelMensal: numericValue})}
+                                    required
+                                  />
+
+                                  <CurrencyInput
+                                    label="Condomínio Mensal"
+                                    value={newProperty.autoValorCondominio !== undefined ? newProperty.autoValorCondominio : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoValorCondominio: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="IPTU Mensal"
+                                    value={newProperty.autoValorIptu !== undefined ? newProperty.autoValorIptu : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoValorIptu: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="Taxa Lixo Mensal"
+                                    value={newProperty.autoTaxaLixo !== undefined ? newProperty.autoTaxaLixo : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoTaxaLixo: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="Taxa Água"
+                                    value={newProperty.autoTaxaAgua !== undefined ? newProperty.autoTaxaAgua : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoTaxaAgua: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="Taxa Luz"
+                                    value={newProperty.autoTaxaLuz !== undefined ? newProperty.autoTaxaLuz : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoTaxaLuz: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="Taxa Gás"
+                                    value={newProperty.autoTaxaGas !== undefined ? newProperty.autoTaxaGas : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoTaxaGas: numericValue})}
+                                  />
+
+                                  <CurrencyInput
+                                    label="Seguro Incêndio"
+                                    value={newProperty.autoSeguroIncendio !== undefined ? newProperty.autoSeguroIncendio : ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, autoSeguroIncendio: numericValue})}
+                                  />
+
+                                  <div className="sm:col-span-2 md:col-span-3 space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Observações da Locação</label>
+                                    <input type="text" placeholder="Observações..."
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-stone-900 font-mono"
+                                      value={newProperty.autoObservacoesLocacao || ''} onChange={e => setNewProperty({...newProperty, autoObservacoesLocacao: e.target.value})} />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* DADOS DA VENDA */}
+                            {newProperty.status === 'Vendido' && (
+                              <div className="col-span-full bg-[#F6F6F4] p-6 rounded-2xl border-l-4 border-amber-500 border-y border-r border-[#EFEFEA] space-y-4 animate-fade-in mb-4">
+                                <div className="text-[10px] font-black uppercase text-stone-900 tracking-wider pb-2 border-b border-stone-200">
+                                  Dados da Venda (Controle Comercial Auto-Venda)
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">Nome do Comprador *</label>
+                                    <input type="text" required placeholder="Ex: Maria Oliveira"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoCompradorNome || ''} onChange={e => setNewProperty({...newProperty, autoCompradorNome: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">CPF/CNPJ do Comprador *</label>
+                                    <input type="text" required placeholder="Ex: 000.000.000-00"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold text-[#111]"
+                                      value={newProperty.autoCompradorCpfCnpj || ''} onChange={e => setNewProperty({...newProperty, autoCompradorCpfCnpj: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">Telefone do Comprador *</label>
+                                    <input type="text" required placeholder="Ex: (15) 99123-4567"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold text-[#111]"
+                                      value={newProperty.autoCompradorTelefone || ''} onChange={e => setNewProperty({...newProperty, autoCompradorTelefone: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">E-mail do Comprador *</label>
+                                    <input type="email" required placeholder="comprador@email.com"
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoCompradorEmail || ''} onChange={e => setNewProperty({...newProperty, autoCompradorEmail: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Data da Venda *</label>
+                                    <input type="date" required
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111]"
+                                      value={newProperty.autoDataVenda || ''} onChange={e => setNewProperty({...newProperty, autoDataVenda: e.target.value})} />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500">Forma de Pagamento *</label>
+                                    <select required className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-stone-900"
+                                      value={newProperty.autoFormaPagamento || 'À Vista'} onChange={e => setNewProperty({...newProperty, autoFormaPagamento: e.target.value})}>
+                                      <option value="À Vista">À Vista</option>
+                                      <option value="Financiamento Bancário">Financiamento Bancário</option>
+                                      <option value="Permuta">Permuta</option>
+                                      <option value="Parcelado Direto">Parcelado Direto</option>
+                                    </select>
+                                  </div>
+
+                                  <CurrencyInput
+                                    label="Valor de Fechamento"
+                                    value={newProperty.autoValorFinalVenda !== undefined ? newProperty.autoValorFinalVenda : ''}
+                                    onChange={({ numericValue }) => {
+                                      const pct = Number(newProperty.autoPercentualComissaoVenda || 6);
+                                      setNewProperty({
+                                        ...newProperty,
+                                        autoValorFinalVenda: numericValue,
+                                        autoValorComissaoVenda: Math.round(numericValue * (pct / 100))
+                                      });
+                                    }}
+                                    required
+                                  />
+
+                                  <PercentInput
+                                    label="Comissão"
+                                    value={newProperty.autoPercentualComissaoVenda !== undefined ? newProperty.autoPercentualComissaoVenda : 6}
+                                    onChange={({ numericValue }) => {
+                                      const val = Number(newProperty.autoValorFinalVenda || 0);
+                                      setNewProperty({
+                                        ...newProperty,
+                                        autoPercentualComissaoVenda: numericValue,
+                                        autoValorComissaoVenda: Math.round(val * (numericValue / 100))
+                                      });
+                                    }}
+                                    required
+                                  />
+
+                                  <CurrencyInput
+                                    label="Comissão (R$ Calculado)"
+                                    value={newProperty.autoValorComissaoVenda !== undefined ? newProperty.autoValorComissaoVenda : ''}
+                                    onChange={() => {}}
+                                    disabled
+                                  />
+
+                                  <div className="sm:col-span-2 md:col-span-3 space-y-1">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Observações da Venda</label>
+                                    <input type="text" placeholder="Observações da transação..."
+                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-stone-900 font-mono"
+                                      value={newProperty.autoObservacoesVenda || ''} onChange={e => setNewProperty({...newProperty, autoObservacoesVenda: e.target.value})} />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* OBSERVAÇÕES DA RESERVA */}
+                            {newProperty.status === 'Reservado' && (
+                              <div className="col-span-full bg-[#F6F6F4] p-5 rounded-2xl border-l-4 border-amber-500 border-y border-r border-[#EFEFEA] space-y-1 animate-fade-in mb-4">
+                                <label className="text-[8px] font-black uppercase text-slate-500 font-mono">Observações da Reserva</label>
+                                <input type="text" placeholder="Ex: Reservado pelo corretor André até dia 20..."
+                                  className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-bold text-[#111] font-mono"
+                                  value={newProperty.autoObservacoesReserva || ''} onChange={e => setNewProperty({...newProperty, autoObservacoesReserva: e.target.value})} />
+                              </div>
+                            )}
 
                             {/* VALORES VENDA */}
                             {(newProperty.purpose === 'Venda' || newProperty.purpose === 'Venda e Locação') && (
                               <div className="md:col-span-2 bg-[#F6F6F4] p-5 rounded-2xl border border-[#EFEFEA] space-y-4 animate-fade-in">
                                 <div className="text-[10px] font-black uppercase text-stone-900 tracking-wider">Métrica de Valores: Venda</div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">Valor de Venda (R$ numérico real)</label>
-                                    <input type="number" placeholder="Ex: 890000"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold"
-                                      value={newProperty.valorVenda || ''} onChange={e => setNewProperty({...newProperty, valorVenda: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Valor de Venda"
+                                    value={newProperty.valorVenda || ''}
+                                    onChange={({ numericValue }) => setNewProperty({
+                                      ...newProperty,
+                                      valorVenda: numericValue,
+                                      priceValue: numericValue
+                                    })}
+                                    required={newProperty.purpose === 'Venda' || newProperty.purpose === 'Venda e Locação'}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">CONDOMÍNIO (mês)</label>
-                                    <input type="number" placeholder="Ex: 450"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold"
-                                      value={newProperty.valorCondominio || ''} onChange={e => setNewProperty({...newProperty, valorCondominio: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Condomínio (mês)"
+                                    value={newProperty.valorCondominio || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, valorCondominio: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500 font-mono">IPTU ANUAL</label>
-                                    <input type="number" placeholder="Ex: 2400"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold"
-                                      value={newProperty.valorIptuAnual || ''} onChange={e => setNewProperty({...newProperty, valorIptuAnual: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="IPTU Anual"
+                                    value={newProperty.valorIptuAnual || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, valorIptuAnual: numericValue, valorIptu: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">TAXA EXCLUSIVA LIXO ANUAL</label>
-                                    <input type="number" placeholder="Ex: 120"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs font-mono font-bold"
-                                      value={newProperty.taxaLixoAnual || ''} onChange={e => setNewProperty({...newProperty, taxaLixoAnual: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Taxa Exclusiva Lixo Anual"
+                                    value={newProperty.taxaLixoAnual || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, taxaLixoAnual: numericValue, taxaLixo: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">TAXA DE GÁS</label>
-                                    <input type="number" placeholder="Gás extra"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs"
-                                      value={newProperty.taxaGas || ''} onChange={e => setNewProperty({...newProperty, taxaGas: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Taxa de Gás"
+                                    value={newProperty.taxaGas || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, taxaGas: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">TAXA DE ÁGUA</label>
-                                    <input type="number" placeholder="Água extra"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs"
-                                      value={newProperty.taxaAgua || ''} onChange={e => setNewProperty({...newProperty, taxaAgua: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Taxa de Água"
+                                    value={newProperty.taxaAgua || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, taxaAgua: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">TAXA DE LUZ</label>
-                                    <input type="number" placeholder="Luz extra"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs"
-                                      value={newProperty.taxaLuz || ''} onChange={e => setNewProperty({...newProperty, taxaLuz: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Taxa de Luz"
+                                    value={newProperty.taxaLuz || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, taxaLuz: numericValue})}
+                                  />
 
-                                  <div className="space-y-1">
-                                    <label className="text-[8px] font-black uppercase text-slate-500">TAXAS ADICIONAIS</label>
-                                    <input type="number" placeholder="Taxas extras"
-                                      className="w-full bg-white border border-[#EFEFEA] rounded-lg px-3 py-2 text-xs"
-                                      value={newProperty.taxasAdicionais || ''} onChange={e => setNewProperty({...newProperty, taxasAdicionais: Number(e.target.value)})} />
-                                  </div>
+                                  <CurrencyInput
+                                    label="Taxas Adicionais"
+                                    value={newProperty.taxasAdicionais || ''}
+                                    onChange={({ numericValue }) => setNewProperty({...newProperty, taxasAdicionais: numericValue})}
+                                  />
 
                                   <div className="col-span-full border-t border-slate-200 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="flex flex-col justify-center space-y-2">
@@ -7631,6 +8751,19 @@ export default function OwnerPortal({
                             onQuantidadeChange={handleQuantidadeOpcao}
                             searchPlaceholder="Pesquisar características..."
                           />
+
+                          {String(newProperty.type || newProperty.propertyType || "").toLowerCase().includes("apartamento") && (
+                            <OptionsChecklist
+                              titulo="Características do Apartamento"
+                              descricao="Itens e recursos específicos para unidades de apartamento"
+                              categoria="caracteristicasApartamento"
+                              opcoes={opcoesCaracteristicasApartamento}
+                              valores={newProperty.caracteristicasApartamento || []}
+                              onChange={handleToggleOpcao}
+                              onQuantidadeChange={handleQuantidadeOpcao}
+                              searchPlaceholder="Pesquisar características do apartamento..."
+                            />
+                          )}
                         </div>
                       )}
 
@@ -8036,6 +9169,89 @@ export default function OwnerPortal({
                                   )}
                                 </button>
                               </div>
+                            </div>
+                          </div>
+
+                          {/* CORRETOR RESPONSÁVEL */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm">
+                            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                              <User size={16} className="text-amber-500" />
+                              <span className="text-[10px] font-black uppercase text-stone-900 tracking-wider">Corretor Responsável pelo Imóvel</span>
+                            </div>
+
+                            <div className="space-y-3">
+                              <label className="text-[9px] font-black uppercase text-stone-600 block">Selecione o Corretor Responsável</label>
+                              <select
+                                className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                                value={newProperty.corretorId || ''}
+                                onChange={(e) => {
+                                  const brokerId = e.target.value;
+                                  if (!brokerId) {
+                                    setNewProperty({
+                                      ...newProperty,
+                                      corretorId: "",
+                                      corretorNome: "",
+                                      corretorTelefone: "",
+                                      corretorWhatsapp: "",
+                                      corretorEmail: "",
+                                      corretorCreci: "",
+                                      corretorFoto: ""
+                                    });
+                                  } else {
+                                    const selectedBroker = brokersList.find((b: any) => b.id === brokerId);
+                                    if (selectedBroker) {
+                                      setNewProperty({
+                                        ...newProperty,
+                                        corretorId: selectedBroker.id || "",
+                                        corretorNome: selectedBroker.nome || "",
+                                        corretorTelefone: selectedBroker.telefone || "",
+                                        corretorWhatsapp: selectedBroker.whatsapp || selectedBroker.whatsApp || selectedBroker.telefone || "",
+                                        corretorEmail: selectedBroker.email || "",
+                                        corretorCreci: selectedBroker.creci || "",
+                                        corretorFoto: selectedBroker.fotoUrl || selectedBroker.foto || ""
+                                      });
+                                    }
+                                  }
+                                }}
+                              >
+                                <option value="">Nenhum - Atendimento RB Sorocaba (Padrão)</option>
+                                {brokersList
+                                  .filter((b: any) => b.ativo !== false)
+                                  .sort((a: any, b: any) => (a.nome || '').localeCompare(b.nome || ''))
+                                  .map((broker: any) => (
+                                    <option key={broker.id} value={broker.id}>
+                                      {broker.nome} {broker.creci ? `(${broker.creci})` : ''}
+                                    </option>
+                                  ))}
+                              </select>
+
+                              {newProperty.corretorId && (
+                                <div className="flex items-center gap-4 p-3 bg-[#F6F6F4] rounded-xl border border-[#EFEFEA]">
+                                  {(newProperty.corretorFoto || newProperty.corretorFotoUrl) ? (
+                                    <img 
+                                      src={newProperty.corretorFoto || newProperty.corretorFotoUrl} 
+                                      alt={newProperty.corretorNome} 
+                                      className="w-12 h-12 rounded-full object-cover border border-amber-500/20"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 text-sm font-black">
+                                      {(newProperty.corretorNome || 'C').substring(0, 1)}
+                                    </div>
+                                  )}
+                                  <div className="text-xs">
+                                    <p className="font-extrabold text-stone-900">{newProperty.corretorNome}</p>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">
+                                      {newProperty.corretorCreci ? `CRECI: ${newProperty.corretorCreci}` : 'CRECI não cadastrado'}
+                                    </p>
+                                    <div className="text-[9px] text-[#7A7F8C] font-semibold mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                                      {newProperty.corretorTelefone && <span>📞 {newProperty.corretorTelefone}</span>}
+                                      {newProperty.corretorWhatsapp && <span>💬 {newProperty.corretorWhatsapp}</span>}
+                                      {newProperty.corretorEmail && <span>✉️ {newProperty.corretorEmail}</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -8816,6 +10032,87 @@ export default function OwnerPortal({
                 </form>
               </motion.div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* DUPLICATION WARNING MODAL */}
+        <AnimatePresence>
+          {duplicationWarning && (
+            <div className="fixed inset-0 z-[2000] overflow-y-auto bg-stone-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl max-w-lg w-full border border-[#EFEFEA] shadow-2xl overflow-hidden flex flex-col p-8 space-y-6">
+                <div className="text-center space-y-3">
+                  <div className="w-14 h-14 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto">
+                    <ShieldAlert size={28} />
+                  </div>
+                  <h3 className="text-base font-black text-stone-900 uppercase tracking-widest">
+                    Aviso de Duplicidade Detectado
+                  </h3>
+                  <p className="text-xs text-stone-500 font-medium leading-relaxed">
+                    {duplicationWarning.type === 'rental' 
+                      ? 'Este imóvel já possui uma locação ativa vinculada a ele no banco de dados. Deseja atualizar a locação existente?'
+                      : 'Este imóvel já possui um registro de venda vinculado a ele no banco de dados. Deseja atualizar a venda existente?'}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const { type, propertyId, propertyData, existingRecord } = duplicationWarning;
+                        if (type === 'rental') {
+                          await onUpdateProperty({ ...propertyData, id: propertyId } as Property);
+                          await createAutomaticRentalFromProperty({ ...propertyData, id: propertyId }, false, existingRecord.id);
+                        } else {
+                          await onUpdateProperty({ ...propertyData, id: propertyId } as Property);
+                          await createAutomaticSaleFromProperty({ ...propertyData, id: propertyId }, false, existingRecord.id);
+                        }
+                        setDuplicationWarning(null);
+                        setShowSuccess(true);
+                        resetForm();
+                      } catch (err) {
+                        alert("Erro ao executar atualização.");
+                      }
+                    }}
+                    className="w-full py-3.5 bg-[#050505] hover:bg-zinc-800 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all shadow"
+                  >
+                    {duplicationWarning.type === 'rental' ? 'Atualizar Locação Existente' : 'Atualizar Venda Existente'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const { type, propertyId, propertyData } = duplicationWarning;
+                        if (type === 'rental') {
+                          await onUpdateProperty({ ...propertyData, id: propertyId } as Property);
+                          await createAutomaticRentalFromProperty({ ...propertyData, id: propertyId }, true);
+                        } else {
+                          await onUpdateProperty({ ...propertyData, id: propertyId } as Property);
+                          await createAutomaticSaleFromProperty({ ...propertyData, id: propertyId }, true);
+                        }
+                        setDuplicationWarning(null);
+                        setShowSuccess(true);
+                        resetForm();
+                      } catch (err) {
+                        alert("Erro ao criar novo registro.");
+                      }
+                    }}
+                    className="w-full py-3.5 bg-neutral-200 hover:bg-neutral-300 text-stone-900 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all"
+                  >
+                    {duplicationWarning.type === 'rental' ? 'Criar Nova Locação mesmo assim' : 'Criar Novo Registro'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDuplicationWarning(null)}
+                    className="w-full py-3.5 bg-[#F6F6F4] hover:bg-[#F1F1ED] text-stone-600 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </AnimatePresence>
 

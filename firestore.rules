@@ -50,6 +50,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /counters/{counterId} {
+      allow read, write: if isAdmin();
+    }
+
     match /leads/{leadId} {
       allow create: if true;
       allow read, update, delete: if isAdmin();

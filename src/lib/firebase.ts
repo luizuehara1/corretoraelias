@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, updateDoc, deleteDoc, orderBy, onSnapshot, setDoc, writeBatch } from "firebase/firestore";
+import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, updateDoc, deleteDoc, orderBy, onSnapshot, setDoc, writeBatch, runTransaction } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
 
 /**
@@ -459,9 +459,17 @@ const buildStandardPropertyDoc = (propertyData: any, isNew: boolean) => {
     manterDisponivelParaVenda: existingGLoc.manterDisponivelParaVenda !== undefined ? !!existingGLoc.manterDisponivelParaVenda : true
   };
 
+  const finalCode = codeValue || "REF" + Math.floor(Math.random() * 10000);
+  const prefix = propertyData.codigoPrefixo || getPrefixoCodigoImovel(propertyData.type || propertyData.tipoImovel || "");
+  const numericPart = propertyData.codigoNumero || (finalCode ? parseInt(finalCode.replace(/\D/g, '')) || 0 : 0);
+  const finalSlug = (finalCode || "").toLowerCase();
+
   const docData: any = {
-    codigo: codeValue || "REF" + Math.floor(Math.random() * 10000),
-    codigoImovel: codeValue || "REF" + Math.floor(Math.random() * 10000),
+    codigo: finalCode,
+    codigoImovel: finalCode,
+    codigoPrefixo: prefix,
+    codigoNumero: numericPart,
+    slug: finalSlug,
 
     titulo: tituloValue,
     nomeEdificio: propertyData.condominium || propertyData.nomeEdificio || "",
@@ -471,14 +479,16 @@ const buildStandardPropertyDoc = (propertyData: any, isNew: boolean) => {
     category: propertyData.category || "Residencial",
     purpose: (tipoNegocioValue === "Venda e Locação" ? "Venda" : tipoNegocioValue) as any,
     status: statusStr,
+    statusImovel: statusStr,
     statusVenda,
     statusLocacao,
 
-    publicado: propertyData.publicado !== undefined ? !!propertyData.publicado : publicado,
-    publicadoNoSite: propertyData.publicadoNoSite !== undefined ? !!propertyData.publicadoNoSite : publicadoNoSite,
+    publicado: propertyData.publicado !== undefined ? !(!propertyData.publicado) : publicado,
+    publicadoNoSite: propertyData.publicadoNoSite !== undefined ? !(!propertyData.publicadoNoSite) : publicadoNoSite,
 
     vendido,
     alugado,
+    reservado: statusStr === "Reservado",
     disponivelParaVisita,
     disponivelParaProposta,
     mostrarNosFiltros: propertyData.mostrarNosFiltros !== undefined ? !!propertyData.mostrarNosFiltros : (propertyData.mostrarCatalogo !== undefined ? !!propertyData.mostrarCatalogo : true),
@@ -723,66 +733,235 @@ export const reorderConfigOptions = async (collectionName: string, items: any[])
   }
 };
 
-export const seedDefaultSettingsIfEmpty = async () => {
+export function gerarValue(label: string) {
+  return String(label || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+export async function seedOptionsIfMissing(collectionName: string, options: string[], grupo?: string): Promise<number> {
+  try {
+    const ref = collection(db, collectionName);
+    const snap = await getDocs(ref);
+
+    // Get existing values or labels normalized
+    const existentes = new Set(
+      snap.docs
+        .filter((docItem) => docItem.id !== "init" && docItem.data()?.init !== true)
+        .map((docItem) => {
+          const d = docItem.data();
+          const val = d.value || d.val || d.nome || d.label || "";
+          return String(val).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        })
+    );
+
+    const batch = writeBatch(db);
+    let count = 0;
+
+    options.forEach((label, index) => {
+      const value = gerarValue(label);
+      const normalizedValue = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      if (!existentes.has(normalizedValue)) {
+        const docRef = doc(collection(db, collectionName));
+        const cleanId = docRef.id;
+
+        batch.set(docRef, {
+          id: cleanId,
+          nome: label,
+          label: label,
+          value: value,
+          grupo: grupo || collectionName,
+          ativo: true,
+          ordem: snap.size + index + 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    console.log(`${count} opções adicionadas em ${collectionName}`);
+    return count;
+  } catch (error) {
+    console.error(`Erro ao semear opções para ${collectionName}:`, error);
+    return 0; // Don't crash if a single collection fails
+  }
+}
+
+export const seedDefaultSettingsIfEmpty = async (): Promise<{ success: boolean; counts: Record<string, number>; message: string }> => {
+  const reports: Record<string, number> = {};
   try {
     const user = auth.currentUser;
 
     if (!user) {
       console.warn("Usuário sem permissão para criar configurações padrão: não autenticado.");
-      return;
+      return { success: false, counts: {}, message: "Usuário não autenticado." };
     }
 
     const isUserAdmin = await checkIfAdmin(user);
 
     if (!isUserAdmin) {
       console.warn("Usuário sem permissão para criar configurações padrão: não é admin.");
-      return;
+      return { success: false, counts: {}, message: "Usuário não é administrador." };
     }
 
-    const collectionsToSeed = [
-      { name: "tiposImovel", defaults: [ "Apartamento", "Casa", "Casa em Condomínio", "Sobrado", "Terreno", "Terreno em Condomínio", "Sala Comercial", "Ponto Comercial", "Galpão", "Chácara", "Sítio", "Área Industrial", "Área Comercial", "Kitnet", "Studio", "Cobertura", "Loft" ] },
-      { name: "tiposNegocio", defaults: [ "Venda", "Locação", "Venda e Locação" ] },
-      { name: "statusImovel", defaults: [ "Disponível", "Vendido", "Alugado", "Reservado", "Em negociação", "Rascunho", "Indisponível" ] },
-      { name: "faixasPreco", defaults: [ "Até R$ 300 mil", "R$ 300 mil a R$ 500 mil", "R$ 500 mil a R$ 800 mil", "R$ 800 mil a R$ 1 milhão", "Acima de R$ 1 milhão" ] },
-      { name: "cidades", defaults: [ "Sorocaba", "Votorantim", "Itu", "Salto", "Araçoiaba da Serra" ] },
-      { name: "caracteristicas", defaults: [ "Mobiliado", "Semi mobiliado", "Decorado", "Novo", "Usado", "Reformado", "Alto padrão", "Andar alto", "Andar baixo", "Sol da manhã", "Sol da tarde", "Fechadura eletrônica", "Varanda gourmet", "Churrasqueira privativa", "Piscina privativa", "Quintal" ] },
-      { name: "instalacoes", defaults: [ "Ar condicionado", "Aquecimento a gás", "Gás central", "Interfone", "Portão eletrônico", "Fechadura eletrônica", "Energia solar", "Gerador" ] },
-      { name: "acabamentos", defaults: [ "Porcelanato", "Piso laminado", "Piso vinílico", "Piso cerâmico", "Mármore", "Granito", "Teto rebaixado", "Iluminação em LED", "Móveis planejados" ] },
-      { name: "lazer", defaults: [ "Piscina", "Academia", "Salão de festas", "Espaço gourmet", "Brinquedoteca", "Playground", "Quadra poliesportiva", "Sauna", "Pet place", "Mini mercado" ] },
-      { name: "ambientes", defaults: [ "Sala de estar", "Sala de jantar", "Sala de TV", "Cozinha", "Varanda", "Despensa", "Home office", "Escritório", "Closet", "Suíte master", "Lavabo", "Quintal" ] },
-      { name: "caracteristicasApartamento", defaults: [ "Sacada", "Varanda gourmet", "Piso laminado", "Porcelanato", "Box Blindex", "Armários embutidos" ] },
-      { name: "caracteristicasEmpreendimento", defaults: [ "Elevador", "Portaria 24 horas", "Segurança 24h", "Bicicletário", "Salão de festas", "Vagas para visitantes" ] },
-      { name: "proximidades", defaults: [ "Mercado", "Supermercado", "Farmácia", "Padaria", "Academia", "Escola", "Universidade", "Hospital", "Shopping", "Restaurante", "Ponto de ônibus", "Acesso rápido ao centro", "Shopping Iguatemi Esplanada", "Shopping Cidade Sorocaba" ] }
+    // 1. CARACTERÍSTICAS GERAIS
+    const caracteristicasOptions = [
+      "Aceita financiamento", "Aceita FGTS", "Aceita permuta", "Imóvel mobiliado", "Imóvel semi-mobiliado",
+      "Imóvel desocupado", "Imóvel alugado", "Imóvel novo", "Imóvel reformado", "Imóvel na planta",
+      "Pronto para morar", "Documentação em ordem", "Escritura definitiva", "Aceita proposta", "Sol da manhã",
+      "Sol da tarde", "Face norte", "Face leste", "Face oeste", "Face sul", "Vista livre",
+      "Vista para área verde", "Vista para cidade", "Alto padrão", "Condomínio fechado", "Portaria 24 horas",
+      "Segurança 24 horas", "Monitoramento por câmeras", "Controle de acesso", "Rua tranquila", "Localização privilegiada",
+      "Próximo ao centro", "Excelente para investimento", "Baixo custo de manutenção", "Ideal para família", "Ideal para renda",
+      "Ideal para comércio", "Permite pets", "Quintal privativo", "Área gourmet", "Varanda gourmet",
+      "Sacada", "Sacada envidraçada", "Planejados", "Ar-condicionado", "Aquecimento solar", "Energia solar",
+      "Gás encanado", "Água individualizada", "Luz individualizada"
     ];
 
-    for (const coll of collectionsToSeed) {
-      try {
-        const snap = await getDocs(collection(db, coll.name));
-        const validDocs = snap.docs.filter(d => d.id !== "init" && d.data()?.init !== true);
-        if (validDocs.length === 0) {
-          console.log(`Seeding default options for ${coll.name}...`);
-          const batch = writeBatch(db);
-          coll.defaults.forEach((val, idx) => {
-            const cleanId = `${coll.name.toLowerCase().substring(0, 3)}_${idx}_${Date.now()}`;
-            const docRef = doc(db, coll.name, cleanId);
-            batch.set(docRef, {
-              id: cleanId,
-              nome: val,
-              label: val,
-              value: val,
-              ativo: true,
-              ordem: idx,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            });
-          });
-          await batch.commit();
-        }
-      } catch (colError) {
-        console.warn(`Erro ao semear coleção ${coll.name} (leitura / escrita negada pelas regras):`, colError);
-      }
+    // 2. AMBIENTES
+    const ambientesOptions = [
+      "Sala de estar", "Sala de jantar", "Sala de TV", "Sala integrada", "Cozinha", "Cozinha americana",
+      "Cozinha planejada", "Copa", "Lavanderia", "Área de serviço", "Despensa", "Escritório",
+      "Home office", "Lavabo", "Banheiro social", "Suíte", "Suíte master", "Closet",
+      "Dormitório", "Quarto de hóspedes", "Varanda", "Sacada", "Varanda gourmet", "Terraço",
+      "Área gourmet", "Espaço gourmet", "Churrasqueira privativa", "Quintal", "Jardim", "Corredor lateral",
+      "Garagem coberta", "Garagem descoberta", "Depósito", "Hobby box", "Porão", "Sótão",
+      "Mezanino", "Edícula", "Banheiro externo", "Dependência de empregada", "Área técnica", "Hall de entrada",
+      "Living", "Sala dois ambientes", "Sala ampla", "Cozinha integrada", "Área externa", "Piscina privativa",
+      "Sauna privativa"
+    ];
+
+    // 3. PROXIMIDADES
+    const proximidadesOptions = [
+      "Próximo a mercado", "Próximo a supermercado", "Próximo a padaria", "Próximo a farmácia", "Próximo a hospital",
+      "Próximo a posto de saúde", "Próximo a escola", "Próximo a faculdade", "Próximo a creche", "Próximo a shopping",
+      "Próximo a restaurante", "Próximo a academia", "Próximo a banco", "Próximo a lotérica", "Próximo a posto de combustível",
+      "Próximo a ponto de ônibus", "Próximo a terminal de ônibus", "Próximo a avenida principal", "Próximo a rodovia", "Próximo a comércio local",
+      "Próximo ao centro", "Próximo a parque", "Próximo a praça", "Próximo a igreja", "Próximo a condomínio empresarial",
+      "Próximo a centro comercial", "Próximo a escolas particulares", "Próximo a escolas públicas", "Próximo a clínicas", "Próximo a pet shop",
+      "Próximo a salão de beleza", "Próximo a lojas", "Próximo a serviços essenciais", "Fácil acesso à Raposo Tavares", "Fácil acesso à Castelo Branco",
+      "Fácil acesso ao centro de Sorocaba", "Fácil acesso ao Campolim", "Fácil acesso à Zona Industrial", "Fácil acesso a Votorantim", "Fácil acesso a Itu",
+      "Fácil acesso a Porto Feliz", "Região valorizada", "Bairro tranquilo", "Rua residencial", "Região com alto potencial de valorização"
+    ];
+
+    // 4. INSTALAÇÕES
+    const instalacoesOptions = [
+      "Ar-condicionado", "Infraestrutura para ar-condicionado", "Aquecimento solar", "Aquecimento a gás", "Boiler",
+      "Energia solar", "Placas solares", "Gás encanado", "Gás individualizado", "Água individualizada",
+      "Energia individualizada", "Internet cabeada", "Fibra óptica disponível", "Interfone", "Portão eletrônico",
+      "Fechadura eletrônica", "Sistema de alarme", "Câmeras de segurança", "Cerca elétrica", "Sensor de presença",
+      "Automação residencial", "Tomadas USB", "Iluminação em LED", "Projeto luminotécnico", "Infraestrutura para carregador elétrico",
+      "Caixa d’água", "Cisterna", "Poço artesiano", "Sistema de irrigação", "Exaustor",
+      "Coifa", "Cooktop", "Forno embutido", "Armários planejados", "Elevador",
+      "Elevador privativo", "Acesso PCD", "Rampa de acesso", "Gerador", "Sistema de reaproveitamento de água",
+      "Preparação para energia fotovoltaica"
+    ];
+
+    // 5. ACABAMENTOS
+    const acabamentosOptions = [
+      "Piso porcelanato", "Piso cerâmico", "Piso laminado", "Piso vinílico", "Piso de madeira",
+      "Piso frio", "Mármore", "Granito", "Bancadas em granito", "Bancadas em mármore",
+      "Bancadas em quartzo", "Revestimento 3D", "Gesso", "Sanca em gesso", "Teto rebaixado",
+      "Iluminação embutida", "Esquadrias de alumínio", "Esquadrias pretas", "Janelas amplas", "Portas de madeira",
+      "Porta pivotante", "Porta balcão", "Box blindex", "Nicho no banheiro", "Cuba esculpida",
+      "Metais de alto padrão", "Louças modernas", "Pintura nova", "Acabamento premium", "Acabamento alto padrão",
+      "Acabamento moderno", "Acabamento clean", "Móveis planejados", "Armários embutidos", "Cozinha planejada",
+      "Banheiros planejados", "Closets planejados", "Paisagismo", "Fachada moderna", "Fachada contemporânea",
+      "Pé direito alto", "Pé direito duplo"
+    ];
+
+    // 6. LAZER
+    const lazerOptions = [
+      "Piscina", "Piscina adulto", "Piscina infantil", "Piscina aquecida", "Deck molhado",
+      "Academia", "Espaço fitness", "Salão de festas", "Salão gourmet", "Espaço gourmet",
+      "Churrasqueira", "Quiosque com churrasqueira", "Playground", "Brinquedoteca", "Quadra poliesportiva",
+      "Quadra de tênis", "Quadra de beach tennis", "Campo de futebol", "Espaço pet", "Pet place",
+      "Pet care", "Coworking", "Sala de reuniões", "Cinema", "Sala de jogos", "Espaço teen",
+      "Espaço kids", "Sauna", "Spa", "Ofurô", "Jacuzzi", "Redário",
+      "Horta comunitária", "Praça interna", "Jardim", "Bosque", "Pista de caminhada",
+      "Ciclovia interna", "Bicicletário", "Market interno", "Mini mercado", "Portaria 24 horas",
+      "Portaria remota", "Segurança 24 horas", "Controle de acesso", "Câmeras de segurança", "Zeladoria",
+      "Elevador", "Garagem coberta", "Vagas para visitantes", "Hall social", "Hall de entrada",
+      "Lounge", "Rooftop", "Solarium", "Espaço delivery", "Lavanderia compartilhada"
+    ];
+
+    // 7. CARACTERÍSTICAS DO APARTAMENTO
+    const caracteristicasApartamentoOptions = [
+      "Andar alto", "Andar baixo", "Frente", "Fundos", "Lateral",
+      "Vista livre", "Sol da manhã", "Sol da tarde", "Sacada", "Sacada gourmet",
+      "Sacada envidraçada", "Varanda", "Varanda gourmet", "Churrasqueira na varanda", "Cozinha integrada",
+      "Sala integrada", "Planta inteligente", "Ambientes integrados", "Suíte master", "Closet",
+      "Lavabo", "Depósito privativo", "Hobby box", "Vaga coberta", "Vaga demarcada",
+      "Duas vagas", "Três vagas", "Elevador social", "Elevador de serviço", "Entrada social",
+      "Entrada de serviço", "Hall privativo", "Apartamento mobiliado", "Apartamento reformado", "Apartamento novo",
+      "Infraestrutura para ar-condicionado", "Fechadura eletrônica"
+    ];
+
+    // 8. CARACTERÍSTICAS DO EMPREENDIMENTO
+    const caracteristicasEmpreendimentoOptions = [
+      "Torre única", "Múltiplas torres", "Condomínio clube", "Condomínio fechado", "Fachada moderna",
+      "Fachada contemporânea", "Alto padrão construtivo", "Hall social decorado", "Elevadores modernos", "Portaria 24 horas",
+      "Portaria remota", "Controle de acesso", "Guarita blindada", "Segurança monitorada", "Circuito de câmeras",
+      "Vagas para visitantes", "Gerador de energia", "Acesso PCD", "Paisagismo", "Área verde",
+      "Área de convivência", "Espaço delivery", "Administração condominial", "Baixo custo condominial", "Medidores individuais",
+      "Gás encanado", "Água individualizada", "Energia individualizada", "Coleta seletiva", "Bicicletário",
+      "Infraestrutura para carro elétrico", "Projeto sustentável", "Captação de água da chuva", "Energia fotovoltaica"
+    ];
+
+    // 9. OPÇÕES DE CATEGORIA DO IMÓVEL
+    const categoriasImovelOptions = [
+      "Residencial", "Comercial", "Industrial", "Rural", "Terreno",
+      "Condomínio", "Lançamento", "Alto Padrão", "Investimento", "Temporada",
+      "Misto", "Corporativo", "Galpão / Logística", "Área Comercial", "Área Rural",
+      "Casa em Condomínio", "Apartamento", "Sala Comercial", "Loja", "Prédio Comercial",
+      "Chácara", "Sítio", "Fazenda"
+    ];
+
+    // 10. TIPOS DE IMÓVEL
+    const tiposImovelOptions = [
+      "Apartamento", "Casa", "Casa em Condomínio", "Sobrado", "Cobertura",
+      "Duplex", "Studio", "Kitnet", "Sala Comercial", "Loja",
+      "Galpão", "Prédio Comercial", "Terreno", "Terreno em Condomínio", "Área Comercial",
+      "Área Industrial", "Chácara", "Sítio", "Fazenda", "Barracão",
+      "Ponto Comercial", "Flat", "Loft", "Casa Térrea"
+    ];
+
+    const extraLegacyDefaults = {
+      tiposNegocio: [ "Venda", "Locação", "Venda e Locação" ],
+      statusImovel: [ "Disponível", "Vendido", "Alugado", "Reservado", "Em negociação", "Rascunho", "Indisponível" ],
+      faixasPreco: [ "Até R$ 300 mil", "R$ 300 mil a R$ 500 mil", "R$ 500 mil a R$ 800 mil", "R$ 800 mil a R$ 1 milhão", "Acima de R$ 1 milhão" ],
+      cidades: [ "Sorocaba", "Votorantim", "Itu", "Salto", "Araçoiaba da Serra" ]
+    };
+
+    // Run custom-built function to seed each without crashing others
+    reports["caracteristicas"] = await seedOptionsIfMissing("caracteristicas", caracteristicasOptions);
+    reports["ambientes"] = await seedOptionsIfMissing("ambientes", ambientesOptions);
+    reports["proximidades"] = await seedOptionsIfMissing("proximidades", proximidadesOptions);
+    reports["instalacoes"] = await seedOptionsIfMissing("instalacoes", instalacoesOptions);
+    reports["acabamentos"] = await seedOptionsIfMissing("acabamentos", acabamentosOptions);
+    reports["lazer"] = await seedOptionsIfMissing("lazer", lazerOptions);
+    reports["caracteristicasApartamento"] = await seedOptionsIfMissing("caracteristicasApartamento", caracteristicasApartamentoOptions);
+    reports["caracteristicasEmpreendimento"] = await seedOptionsIfMissing("caracteristicasEmpreendimento", caracteristicasEmpreendimentoOptions);
+    reports["categoriasImovel"] = await seedOptionsIfMissing("categoriasImovel", categoriasImovelOptions);
+    reports["tiposImovel"] = await seedOptionsIfMissing("tiposImovel", tiposImovelOptions);
+
+    // Seed extras
+    for (const [name, defaults] of Object.entries(extraLegacyDefaults)) {
+      reports[name] = await seedOptionsIfMissing(name, defaults);
     }
 
+    // Seed Bairros
     try {
       const snapBairros = await getDocs(collection(db, "bairros"));
       const validBairros = snapBairros.docs.filter(d => d.id !== "init" && d.data()?.init !== true);
@@ -812,11 +991,13 @@ export const seedDefaultSettingsIfEmpty = async () => {
           });
         });
         await batch.commit();
+        reports["bairros"] = defaultBairros.length;
       }
     } catch (bairrosError) {
       console.warn("Erro ao semear bairros:", bairrosError);
     }
 
+    // Seed home, sections, company, appearance settings if missing
     try {
       const homeRef = doc(db, "siteSettings", "home");
       const homeSnap = await getDoc(homeRef);
@@ -930,8 +1111,10 @@ export const seedDefaultSettingsIfEmpty = async () => {
       console.warn("Erro ao semear siteSettings (appearance):", appearanceError);
     }
 
+    return { success: true, counts: reports, message: "Opções padrão adicionadas com sucesso." };
   } catch (error) {
     console.error("Error during seedDefaultSettingsIfEmpty:", error);
+    return { success: false, counts: reports, message: `Erro ao executar o seed: ${error}` };
   }
 };
 
@@ -955,11 +1138,171 @@ export const publishPropertyToSite = async (id: string, isPublished: boolean) =>
 };
 
 /**
+ * Gets the property code prefix based on its type
+ */
+export const getPrefixoCodigoImovel = (tipoImovel: string): string => {
+  const tipo = String(tipoImovel || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const mapa: { [key: string]: string } = {
+    "apartamento": "AP",
+    "casa": "CA",
+    "terreno": "TE",
+    "cobertura": "CO",
+    "sala comercial": "SA",
+    "sobrado": "SO",
+    "galpao": "GA",
+    "chacara": "CH",
+    "kitnet": "KI",
+    "studio": "ST",
+    "loja": "LJ",
+    "predio comercial": "PC",
+    "duplex": "DU"
+  };
+
+  if (mapa[tipo]) return mapa[tipo];
+
+  for (const key of Object.keys(mapa)) {
+    if (tipo.includes(key)) {
+      return mapa[key];
+    }
+  }
+
+  return "IM";
+};
+
+/**
+ * Generates the next sequential property code using Firestore Transaction
+ */
+export const gerarCodigoImovelComTransaction = async (tipoImovel: string): Promise<string> => {
+  const prefixo = getPrefixoCodigoImovel(tipoImovel);
+  const counterRef = doc(db, "counters", `imoveis_${prefixo}`);
+
+  try {
+    const codigo = await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+      let nextNumber = 1;
+
+      if (counterSnap.exists()) {
+        nextNumber = counterSnap.data().nextNumber || 1;
+      }
+
+      const codigoGerado = `${prefixo}${String(nextNumber).padStart(3, "0")}`;
+
+      transaction.set(counterRef, {
+        prefixo,
+        nextNumber: nextNumber + 1,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      return codigoGerado;
+    });
+
+    return codigo;
+  } catch (error) {
+    console.error(`Erro ao gerar código por transação para o prefixo ${prefixo}:`, error);
+    // Safe distinct fallback
+    const randSuffix = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+    return `${prefixo}${randSuffix}`;
+  }
+};
+
+/**
+ * Obtains the current code preview (read-only real-time preview)
+ */
+export const obterPreviaCodigoImovel = async (tipoImovel: string): Promise<string> => {
+  const prefixo = getPrefixoCodigoImovel(tipoImovel);
+  const counterRef = doc(db, "counters", `imoveis_${prefixo}`);
+  try {
+    const snap = await getDoc(counterRef);
+    let nextNumber = 1;
+    if (snap.exists()) {
+      nextNumber = snap.data().nextNumber || 1;
+    }
+    return `${prefixo}${String(nextNumber).padStart(3, "0")}`;
+  } catch (error) {
+    console.error("Erro ao obter prévia de código:", error);
+    return `${prefixo}001`;
+  }
+};
+
+/**
+ * Searches a property in the inventory collection by its code or its raw Firestore ID as fallback
+ */
+export const getImovelByCodigo = async (codigoParam: string) => {
+  const codigoOriginal = String(codigoParam || "").trim();
+  if (!codigoOriginal) return null;
+  const codigoUpper = codigoOriginal.toUpperCase();
+  const codigoLower = codigoOriginal.toLowerCase();
+
+  const tentativas = [
+    { field: "codigoImovel", value: codigoUpper },
+    { field: "codigo", value: codigoUpper },
+    { field: "slug", value: codigoLower },
+    { field: "referencia", value: codigoUpper }
+  ];
+
+  for (const tentative of tentativas) {
+    try {
+      const q = query(
+        collection(db, "imoveis"),
+        where(tentative.field, "==", tentative.value)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const docItem = snap.docs[0];
+        return {
+          id: docItem.id,
+          ...docItem.data()
+        } as any;
+      }
+    } catch (e) {
+      console.warn(`Erro ao buscar no Firestore por ${tentative.field}:`, e);
+    }
+  }
+
+  // Fallback by direct Firestore ID lookup
+  try {
+    const ref = doc(db, "imoveis", codigoOriginal);
+    const byId = await getDoc(ref);
+    if (byId.exists()) {
+      return {
+        id: byId.id,
+        ...byId.data()
+      } as any;
+    }
+  } catch (e) {
+    console.warn("Erro ao buscar no Firestore por ID do imóvel:", e);
+  }
+
+  return null;
+};
+
+/**
  * Adds a new property to the inventory
  */
 export const addPropertyToInventory = async (propertyData: any) => {
   try {
-    const firestoreData = buildStandardPropertyDoc(propertyData, true);
+    let code = propertyData.codigo || propertyData.codigoImovel || "";
+    const isCodeEmptyOrTemporary = !code || String(code).toUpperCase().startsWith("REF");
+
+    if (isCodeEmptyOrTemporary) {
+      const tipo = propertyData.type || propertyData.tipoImovel || "Outros";
+      code = await gerarCodigoImovelComTransaction(tipo);
+    } else {
+      code = String(code).trim().toUpperCase();
+    }
+
+    const dataWithCode = {
+      ...propertyData,
+      codigo: code,
+      codigoImovel: code
+    };
+
+    const firestoreData = buildStandardPropertyDoc(dataWithCode, true);
     const docRef = await addDoc(collection(db, "imoveis"), firestoreData);
     return { success: true, id: docRef.id };
   } catch (error) {
@@ -974,7 +1317,24 @@ export const addPropertyToInventory = async (propertyData: any) => {
 export const updatePropertyInInventory = async (id: string, propertyData: any) => {
   try {
     const docRef = doc(db, "imoveis", id);
-    const firestoreData = buildStandardPropertyDoc(propertyData, false);
+
+    let code = propertyData.codigo || propertyData.codigoImovel || "";
+    const isCodeEmptyOrTemporary = !code || String(code).toUpperCase().startsWith("REF");
+
+    if (isCodeEmptyOrTemporary) {
+      const tipo = propertyData.type || propertyData.tipoImovel || "Outros";
+      code = await gerarCodigoImovelComTransaction(tipo);
+    } else {
+      code = String(code).trim().toUpperCase();
+    }
+
+    const dataWithCode = {
+      ...propertyData,
+      codigo: code,
+      codigoImovel: code
+    };
+
+    const firestoreData = buildStandardPropertyDoc(dataWithCode, false);
     await updateDoc(docRef, firestoreData);
     return { success: true };
   } catch (error) {
