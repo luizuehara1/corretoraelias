@@ -92,7 +92,8 @@ import {
   publishPropertyToSite,
   seedDefaultSettingsIfEmpty,
   getImovelByCodigo,
-  getPrefixoCodigoImovel
+  getPrefixoCodigoImovel,
+  getRedirectResult
 } from './lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { exportReportToPDF, generateFullCatalogPDF } from './lib/pdfExport';
@@ -3917,6 +3918,21 @@ export default function App() {
       if (unsubscribeFavorites) unsubscribeFavorites();
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    async function checkRedirectLogin() {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          console.log("Login via redirect concluído com sucesso:", result.user.email);
+        }
+      } catch (error: any) {
+        console.error("Erro no retorno do redirect do Google Login:", error);
+        alert(`Erro de autenticação por redirecionamento: ${error.message || error}`);
+      }
+    }
+    checkRedirectLogin();
+  }, []);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, updateDoc, deleteDoc, orderBy, onSnapshot, setDoc, writeBatch, runTransaction } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, User } from "firebase/auth";
 
 /**
  * IMPORTANTE: Para que estas variáveis funcionem na Vercel, você deve cadastrar
@@ -14,8 +14,55 @@ export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
 export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const loginWithGoogle = async () => {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({
+    prompt: 'select_account'
+  });
+
+  const isMobileOrSafari = typeof navigator !== 'undefined' && (
+    /iPhone|iPad|iPod|Safari/i.test(navigator.userAgent) &&
+    !/Chrome/i.test(navigator.userAgent)
+  );
+
+  const isProduction = typeof window !== 'undefined' && 
+    window.location.hostname !== 'localhost' && 
+    window.location.hostname !== '127.0.0.1';
+
+  if (isMobileOrSafari || isProduction) {
+    console.log("Detectado ambiente móvel/Safari ou Produção: usando signInWithRedirect por padrão.");
+    try {
+      await signInWithRedirect(auth, provider);
+      return;
+    } catch (redirectErr) {
+      console.error("Erro ao iniciar login via redirect:", redirectErr);
+    }
+  }
+
+  try {
+    return await signInWithPopup(auth, provider);
+  } catch (error: any) {
+    console.error("Erro no popup Google:", error);
+
+    if (
+      error.code === "auth/popup-blocked" ||
+      error.code === "auth/popup-closed-by-user" ||
+      error.code === "auth/cancelled-popup-request" ||
+      error.code === "auth/unauthorized-domain" ||
+      error.message?.includes("Cross-Origin-Opener-Policy") ||
+      error.message?.includes("popup")
+    ) {
+      console.warn("Popup bloqueado ou com erro. Tentando redirect...");
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+
+    throw error;
+  }
+};
+
 export const logout = () => signOut(auth);
+export { signInWithRedirect, getRedirectResult };
 
 /**
  * Checks if a user has admin status directly by records in admins/administradores collections.
