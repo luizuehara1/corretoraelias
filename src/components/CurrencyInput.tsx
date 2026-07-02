@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { formatCurrencyBR, parseCurrencyBR, cleanCurrencyInput } from '../lib/currency-utils';
 
 interface CurrencyInputProps {
   label: string;
@@ -11,7 +12,10 @@ interface CurrencyInputProps {
   error?: string;
 }
 
-// Helper Functions
+// Re-export helpers for backward compatibility
+export { formatCurrencyBR as formatNumberToCurrencyBR };
+export { parseCurrencyBR as parseCurrencyInputBR };
+
 export function onlyNumbers(value: any): string {
   return String(value || "").replace(/\D/g, "");
 }
@@ -19,37 +23,13 @@ export function onlyNumbers(value: any): string {
 export function formatCurrencyInputBR(value: any): string {
   const numeric = onlyNumbers(value);
   if (!numeric) return "";
-  const numberValue = Number(numeric);
-  return numberValue.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    minimumFractionDigits: 2
-  });
-}
-
-export function parseCurrencyInputBR(value: any): number {
-  if (typeof value === "number") return value;
-  const clean = String(value || "")
-    .replace(/[R$\s.]/g, "")
-    .replace(",", ".");
-  const numberValue = Number(clean);
-  if (Number.isNaN(numberValue)) return 0;
-  return numberValue;
-}
-
-export function formatNumberToCurrencyBR(value: any): string {
-  const numberValue = Number(value || 0);
-  return numberValue.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL"
-  });
+  const numberValue = Number(numeric) / 100;
+  return formatCurrencyBR(numberValue);
 }
 
 export function normalizeCurrencyField(value: any) {
-  const numericValue = parseCurrencyInputBR(value);
-  const formattedValue = numericValue
-    ? formatNumberToCurrencyBR(numericValue)
-    : "";
+  const numericValue = parseCurrencyBR(value);
+  const formattedValue = formatCurrencyBR(numericValue);
   return {
     numericValue,
     formattedValue
@@ -60,58 +40,61 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   label,
   value,
   onChange,
-  placeholder = "R$ 0,00",
+  placeholder = "0,00",
   required = false,
   disabled = false,
   name,
   error
 }) => {
-  // Determine clean numeric representation first
-  const numericVal = typeof value === "number" ? value : parseCurrencyInputBR(value);
-  
-  // Format to standard pt-BR currency
-  const displayValue = numericVal > 0 ? formatNumberToCurrencyBR(numericVal) : "";
-
+  const [valorDisplay, setValorDisplay] = useState<string>("");
   const [inputError, setInputError] = useState<string | null>(null);
+
+  // Synchronize internal display state with parent value
+  useEffect(() => {
+    if (value !== undefined && value !== null && value !== "") {
+      const numericVal = typeof value === "number" ? value : parseCurrencyBR(value);
+      const parsedDisplay = parseCurrencyBR(valorDisplay);
+      if (numericVal !== parsedDisplay) {
+        // Format without R$ for the input field
+        const formatted = formatCurrencyBR(numericVal).replace("R$", "").trim();
+        setValorDisplay(numericVal > 0 ? formatted : "");
+      }
+    } else {
+      setValorDisplay("");
+    }
+  }, [value]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value;
-    let digits = rawValue.replace(/\D/g, "");
     
-    // Check if the input contains formatting characters (e.g., loaded or typed from a format)
-    const isFormatted = rawValue.includes(",") || rawValue.includes(".");
-    
-    if (isFormatted && digits.length >= 3) {
-      digits = digits.slice(0, -2);
-    }
-    
-    if (!digits) {
-      if (required) {
-        setInputError("Informe um valor válido.");
-      } else {
-        setInputError(null);
-      }
-      onChange({ numericValue: 0, formattedValue: "" });
-      return;
-    }
-    
-    const numericValue = Number(digits);
-    
-    if (required && numericValue === 0) {
-      setInputError("Informe um valor válido.");
-    } else {
-      setInputError(null);
-    }
+    // Only allow digits, comma, dot, spaces
+    const cleaned = cleanCurrencyInput(rawValue);
+    setValorDisplay(cleaned);
 
-    const formattedValue = formatCurrencyInputBR(digits);
+    const numericValue = parseCurrencyBR(cleaned);
+    
+    // Do not show validation error while user is actively typing
+    setInputError(null);
+
+    const formattedValue = formatCurrencyBR(numericValue);
     onChange({ numericValue, formattedValue });
   };
 
   const handleBlur = () => {
-    if (required && (!numericVal || numericVal === 0)) {
+    const numericValue = parseCurrencyBR(valorDisplay);
+    
+    if (required && (!numericValue || numericValue <= 0)) {
       setInputError("Informe um valor válido.");
     } else {
       setInputError(null);
+    }
+
+    if (!isNaN(numericValue) && numericValue > 0) {
+      // Format without R$ for the input field
+      const formatted = formatCurrencyBR(numericValue).replace("R$", "").trim();
+      setValorDisplay(formatted);
+    } else {
+      setValorDisplay("");
     }
   };
 
@@ -128,12 +111,13 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
         </div>
         <input
           type="text"
+          inputMode="decimal"
           id={name ? `id_${name}` : undefined}
           name={name}
           disabled={disabled}
           placeholder={placeholder}
           className={`w-full bg-white border ${activeError ? 'border-rose-500 focus:ring-1 focus:ring-rose-500' : 'border-[#EFEFEA] focus:ring-1 focus:ring-amber-500'} rounded-xl pl-9 pr-3 py-2.5 text-xs font-mono font-bold text-stone-900 outline-none transition-colors ${disabled ? 'bg-stone-50 cursor-not-allowed opacity-60' : ''}`}
-          value={displayValue ? displayValue.replace("R$", "").trim() : ""}
+          value={valorDisplay}
           onChange={handleInputChange}
           onBlur={handleBlur}
         />

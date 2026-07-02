@@ -56,7 +56,8 @@ service cloud.firestore {
 
     match /leads/{leadId} {
       allow create: if true;
-      allow read, update, delete: if isAdmin();
+      allow read: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /property_submissions/{submissionId} {
@@ -93,15 +94,18 @@ service cloud.firestore {
     }
 
     match /locacoes/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /financeiro/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /transacoesFinanceiras/{id} {
-      allow read, write: if isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /agendamentos/{id} {
@@ -123,6 +127,21 @@ service cloud.firestore {
     // Dynamic Dropdown Config Options & Settings Collections
     // ---------------------------------------------------------
     match /siteSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /propostas/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /contrapropostas/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /aceitesProposta/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /contratos/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /contratosLocacao/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /recibos/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /documentosGerados/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /clausulas/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /contractClauses/{id} { allow read: if true; allow write: if isAdmin(); }
+
+    match /categoriasImovel/{id} {
       allow read: if true;
       allow write: if isAdmin();
     }

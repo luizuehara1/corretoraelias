@@ -28,6 +28,7 @@ import {
   CheckCircle2,
   Plus,
   ArrowUp,
+  ArrowUpRight,
   ArrowDown,
   Trash2,
   Eye,
@@ -61,6 +62,10 @@ import { exportReportToPDF } from '../lib/pdfExport';
 import ConfigOptionManager from './ConfigOptionManager';
 import { CurrencyInput, normalizeCurrencyField, formatNumberToCurrencyBR, parseCurrencyInputBR } from './CurrencyInput';
 import { PercentInput, formatPercentBR } from './PercentInput';
+import { RentalDashboard } from './RentalDashboard';
+import { ContractsDashboard } from './ContractsDashboard';
+import { ContractWizard } from './ContractWizard';
+import { FinancialDashboard } from './FinancialDashboard';
 
 // Re-using same Property interface for consistency
 export interface Property {
@@ -758,6 +763,12 @@ export default function OwnerPortal({
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  // States for ContractWizard integration from physical property inventory cards
+  const [wizardProperty, setWizardProperty] = useState<any>(null);
+  const [showDocChoiceModal, setShowDocChoiceModal] = useState(false);
+  const [wizardOpenFromPortal, setWizardOpenFromPortal] = useState(false);
+  const [wizardTypeFromPortal, setWizardTypeFromPortal] = useState<'Proposta' | 'Contraproposta' | 'ContratoCompraVenda' | 'ContratoLocacao' | 'ReciboEditavel'>('Proposta');
+
   // States from original admin component
   const [showAddForm, setShowAddForm] = useState(!isAuthorized);
   const [editingId, setEditingId] = useState<string | number | null>(null);
@@ -842,13 +853,16 @@ export default function OwnerPortal({
 
   const opcoesStatusImovel = useMemo(() => {
     const list = opcoesCadastro.statusImovel || [];
+    let mapped: string[] = [];
     if (list.length > 0) {
-      return list.map((item: any) => {
+      mapped = list.map((item: any) => {
         if (typeof item === 'string') return item;
         return item.nome || item.label || item.value || '';
       }).filter(Boolean);
+    } else {
+      mapped = ["Disponível", "Alugado", "Vendido", "Reservado", "Indisponível", "Em negociação", "Em análise", "Rascunho"];
     }
-    return ["Disponível", "Alugado", "Vendido", "Reservado", "Indisponível", "Em negociação", "Em análise", "Rascunho"];
+    return Array.from(new Set(mapped));
   }, [opcoesCadastro]);
 
   const opcoesTiposImovel = useMemo(() => {
@@ -4170,6 +4184,7 @@ export default function OwnerPortal({
     { id: 'inventory', label: 'Imóveis', icon: Home },
     { id: 'add_property_tab', label: 'Cadastrar Imóvel', icon: PlusCircle },
     { id: 'rentals', label: 'Gestão de Locações', icon: ShieldCheck, badgeCount: myProperties.filter((p: any) => p.alugado || p.statusLocacao === 'Alugado' || p.gestaoLocacao?.alugado).length },
+    { id: 'contracts', label: 'Contratos e Propostas', icon: FileText },
     { id: 'financial', label: 'Financeiro', icon: Wallet },
     { id: 'visits', label: 'Visitas / Agenda', icon: Calendar, badgeCount: myVisits.filter(v => v.status === 'pending').length },
     { id: 'submissions', label: 'Solicitações', icon: FileText, badgeCount: mySubmissions.length },
@@ -4220,7 +4235,7 @@ export default function OwnerPortal({
                 },
                 {
                   title: "Operações",
-                  items: menuItems.filter(item => ['inventory', 'add_property_tab', 'rentals', 'visits', 'submissions'].includes(item.id))
+                  items: menuItems.filter(item => ['inventory', 'add_property_tab', 'rentals', 'contracts', 'visits', 'submissions'].includes(item.id))
                 },
                 {
                   title: "Finanças",
@@ -4415,6 +4430,24 @@ export default function OwnerPortal({
                       >
                         <Plus size={16} className="text-[#F5B400] shrink-0 group-hover:text-black" />
                         <span>+ Novo Imóvel</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('contracts')}
+                        className={`group flex items-center space-x-3 w-full p-3 rounded-xl transition-all ${
+                          activeTab === 'contracts' ? 'bg-[#F5B400] text-black shadow-sm' : 'hover:bg-neutral-100 text-neutral-600'
+                        }`}
+                      >
+                        <FileText size={18} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Contratos e Propostas</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('rentals')}
+                        className={`group flex items-center space-x-3 w-full p-3 rounded-xl transition-all ${
+                          activeTab === 'rentals' ? 'bg-[#F5B400] text-black shadow-sm' : 'hover:bg-neutral-100 text-neutral-600'
+                        }`}
+                      >
+                        <Calendar size={18} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Gestão Locações</span>
                       </button>
                       <button
                         onClick={() => setActiveTab('visits')}
@@ -4816,10 +4849,20 @@ export default function OwnerPortal({
                                       setViewingProperty(p);
                                     }
                                   }}
-                                  className="w-full py-3 bg-[#050505] text-white hover:bg-[#F5B400] hover:text-[#050505] rounded-xl font-bold text-xs uppercase tracking-wider transition-all duration-305 flex items-center justify-center gap-2 cursor-pointer shadow-sm border border-[#050505]"
+                                  className="w-full py-3 bg-[#050505] text-white hover:bg-neutral-850 hover:text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm border border-[#050505]"
                                 >
-                                  <Eye size={14} className="text-[#F5B400] group-hover:text-black shrink-0" />
+                                  <Eye size={14} className="text-[#F5B400] shrink-0" />
                                   Visualizar Ficha Técnica
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setWizardProperty(p);
+                                    setShowDocChoiceModal(true);
+                                  }}
+                                  className="w-full py-3 bg-[#F5B400] text-black hover:bg-[#111111] hover:text-[#F5B400] rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-sm border border-[#F5B400]"
+                                >
+                                  <FileText size={14} className="shrink-0" />
+                                  Gerar Documento / Contrato
                                 </button>
                               </div>
                             </div>
@@ -5807,108 +5850,19 @@ export default function OwnerPortal({
 
               {/* 5. FINANCEIRO TAB VIEW (EXCLUSIVE REGION) */}
               {activeTab === 'financial' && !showAddForm && (
-                <div className="space-y-6">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div>
-                      <h3 className="text-lg font-black text-stone-900 uppercase tracking-widest">
-                        Extrato Financeiro consolidado
-                      </h3>
-                      <p className="text-xs text-slate-400 font-semibold uppercase mt-1">Seu portfólio de alta renda no comitê RB</p>
-                    </div>
-
-
-                  </div>
-
-                  {/* Financial cards metric summary */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {[
-                      { label: 'Valor em Carteira', val: formatCurrencyValue(financialTotals.portfolio), desc: 'Patrimônio global ativo' },
-                      { label: 'Receita Prevista', val: formatCurrencyValue(financialTotals.predicted), desc: 'Próximos fluxos estimados' },
-                      { label: 'Valores Recebidos', val: formatCurrencyValue(financialTotals.received), desc: 'Lançamentos liquidados no mês' },
-                      { label: 'Valores Pendentes', val: formatCurrencyValue(financialTotals.pending), desc: 'Valores aguardando liberação' },
-                    ].map((f, i) => (
-                      <div key={i} className="bg-white border border-[#EFEFEA] p-6 rounded-2xl shadow-sm hover:border-amber-400 transition-all">
-                        <span className="text-[9px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1 leading-none block border-l-2 border-amber-500">
-                          {f.label}
-                        </span>
-                        <p className="text-base md:text-xl font-black text-stone-900 leading-none mt-3 tracking-tight">
-                          {f.val}
-                        </p>
-                        <p className="text-[10px] text-slate-400 mt-2 italic">
-                          {f.desc}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Financial list history */}
-                  <div className="bg-white border border-[#EFEFEA] rounded-2xl p-6 shadow-sm space-y-4">
-                    <div className="border-b border-slate-50 pb-3">
-                      <h4 className="text-xs font-black text-stone-900 uppercase tracking-widest">Histórico Financeiro</h4>
-                    </div>
-
-                    {financialLoading ? (
-                      <div className="py-12 flex items-center justify-center text-slate-400 text-xs">
-                        <Loader2 className="animate-spin text-amber-500 mr-2" size={16} />
-                        Carregando informações financeiras do Firestore...
-                      </div>
-                    ) : financialList.length === 0 ? (
-                      <div className="py-12 text-center text-slate-400 text-xs space-y-3">
-                        <Wallet className="mx-auto text-slate-300 " size={42} />
-                        <p className="italic">Nenhuma movimentação financeira ainda.</p>
-                        <p className="text-[10px] font-medium text-slate-400 max-w-sm mx-auto">
-                          Seus repasses, comissões e taxas são processados e anexados pela RB Sorocaba. Clique em "Carregar Dados de Demonstração" acima para testar este painel rústico.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs text-slate-600">
-                          <thead>
-                            <tr className="border-b border-slate-100 text-[9px] text-[#A1A1AA] font-black uppercase tracking-widest">
-                              <th className="pb-3 text-left">Data</th>
-                              <th className="pb-3 text-left">Imóvel</th>
-                              <th className="pb-3 text-left">Descrição</th>
-                              <th className="pb-3 text-center">Tipo</th>
-                              <th className="pb-3 text-right">Valor</th>
-                              <th className="pb-3 text-right">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-50 pt-2 font-medium">
-                            {financialList.map((trx, idx) => (
-                              <tr key={trx.id || idx} className="hover:bg-slate-50/50">
-                                <td className="py-4 font-bold text-stone-800">{trx.date.split('-').reverse().join('/')}</td>
-                                <td className="py-4 max-w-[150px] truncate pr-2" title={trx.propertyName}>{trx.propertyName}</td>
-                                <td className="py-4 text-slate-500 max-w-[200px] truncate" title={trx.description}>{trx.description}</td>
-                                <td className="py-4 text-center">
-                                  <span className="bg-slate-50 border border-slate-100 text-slate-600 px-2.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
-                                    {trx.type || 'Repasse'}
-                                  </span>
-                                </td>
-                                <td className={`py-4 text-right font-bold ${trx.value < 0 ? 'text-rose-500' : 'text-stone-900'}`}>{formatCurrencyValue(trx.value)}</td>
-                                <td className="py-4 text-right">
-                                  <span className={`
-                                    px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest
-                                    ${trx.status === 'Recebido' 
-                                      ? 'bg-emerald-50 text-emerald-600' 
-                                      : trx.status === 'Pendente' 
-                                        ? 'bg-amber-50 text-amber-700' 
-                                        : 'bg-zinc-100 text-zinc-500'
-                                    }
-                                  `}>
-                                    {trx.status || 'Pendente'}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <FinancialDashboard />
               )}
 
-              {/* 6. PERFIL TAB VIEW (EXCLUSIVE REGION) */}
+              {/* 7. GESTÃO DE LOCAÇÕES TAB VIEW */}
+              {activeTab === 'rentals' && !showAddForm && (
+                <RentalDashboard />
+              )}
+
+              {/* 8. CONTRATOS E PROPOSTAS TAB VIEW */}
+              {activeTab === 'contracts' && !showAddForm && (
+                <ContractsDashboard />
+              )}
+
               {activeTab === 'profile' && !showAddForm && (
                 <div className="space-y-8 max-w-4xl">
                   <div>
@@ -10115,6 +10069,88 @@ export default function OwnerPortal({
             </div>
           )}
         </AnimatePresence>
+
+        {/* MODAL PARA ESCOLHER TIPO DE DOCUMENTO LOGO APÓS CLICAR EM 'GERAR DOCUMENTO' NO IMÓVEL */}
+        <AnimatePresence>
+          {showDocChoiceModal && wizardProperty && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+              <div className="bg-white border border-stone-200 p-6 md:p-8 rounded-3xl max-w-sm w-full space-y-5 shadow-2xl relative text-stone-900">
+                
+                <button 
+                  onClick={() => {
+                    setShowDocChoiceModal(false);
+                    setWizardProperty(null);
+                  }}
+                  className="absolute top-4 right-4 text-stone-400 hover:text-black font-extrabold text-xs cursor-pointer"
+                >
+                  ✕
+                </button>
+
+                <div className="space-y-1.5 flex flex-col items-center text-center">
+                  <div className="w-12 h-12 bg-[#F5B400]/10 text-amber-500 rounded-full flex items-center justify-center">
+                    <FileText size={20} />
+                  </div>
+                  <h3 className="text-xs font-black uppercase text-stone-900 tracking-widest mt-2">
+                    Gerar Documento Oficial
+                  </h3>
+                  <p className="text-[11px] text-stone-500 font-bold max-w-xs leading-tight">
+                    Imóvel: {wizardProperty.title}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  {[
+                    { id: 'Proposta', label: 'Proposta de Compra' },
+                    { id: 'Contraproposta', label: 'Contraproposta de Compra' },
+                    { id: 'ContratoCompraVenda', label: 'Contrato Compra & Venda' },
+                    { id: 'ContratoLocacao', label: 'Contrato de Locação' },
+                    { id: 'ReciboEditavel', label: 'Recibo Editável' }
+                  ].map((btn) => (
+                    <button
+                      key={btn.id}
+                      onClick={() => {
+                        setWizardTypeFromPortal(btn.id as any);
+                        setShowDocChoiceModal(false);
+                        setWizardOpenFromPortal(true);
+                      }}
+                      className="w-full text-left p-3.5 bg-stone-100 hover:bg-[#F5B400]/10 hover:border-[#F5B400] border border-stone-200 rounded-2xl text-[11px] font-black uppercase tracking-wider text-stone-800 transition flex justify-between items-center cursor-pointer"
+                    >
+                      <span>{btn.label}</span>
+                      <ArrowUpRight size={13} className="text-amber-500 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowDocChoiceModal(false);
+                    setWizardProperty(null);
+                  }}
+                  className="w-full py-3 bg-neutral-100 hover:bg-neutral-250 text-stone-600 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition cursor-pointer"
+                >
+                  cancelar
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* COMPONENT CONTRACT WIZARD SEAMLESSLY ATTACHED */}
+        {wizardOpenFromPortal && wizardProperty && (
+          <ContractWizard 
+            onClose={() => {
+              setWizardOpenFromPortal(false);
+              setWizardProperty(null);
+            }}
+            initialImovel={wizardProperty}
+            initialDocType={wizardTypeFromPortal}
+          />
+        )}
 
       </main>
     </motion.div>
