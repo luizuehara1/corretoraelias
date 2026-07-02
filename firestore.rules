@@ -9,8 +9,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function hasUserDoc() {
+      return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
     function isAdmin() {
@@ -18,8 +22,19 @@ service cloud.firestore {
         request.auth.token.email == 'luiz.uehara1@gmail.com' ||
         request.auth.token.email == 'eliasborgess@creci.org.com.br' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        exists(/databases/$(database)/documents/administradores/$(request.auth.uid))
+        exists(/databases/$(database)/documents/administradores/$(request.auth.uid)) ||
+        (hasUserDoc() && getUserData().perfil == 'Administrador')
       );
+    }
+
+    function isLider() {
+      return isSignedIn() && (
+        (hasUserDoc() && getUserData().perfil == 'Líder')
+      );
+    }
+
+    function hasPermission(perm) {
+      return isAdmin() || (hasUserDoc() && getUserData().permissoes.hasAny([perm]));
     }
 
     // ---------------------------------------------------------
@@ -30,7 +45,7 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------
-    // Admins and Administradores Collections
+    // Backwards Compatible Admins Collections
     // ---------------------------------------------------------
     match /admins/{adminId} {
       allow read: if isSignedIn();
@@ -43,37 +58,65 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------
+    // Users (usuarios) Coleção de Perfis
+    // ---------------------------------------------------------
+    match /usuarios/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() || isLider();
+      allow update: if isAdmin() || isLider() || (isSignedIn() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Notifications (notificacoes) Coleção
+    // ---------------------------------------------------------
+    match /notificacoes/{notifId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isLider() ||
+        resource.data.destinatarioEmail == request.auth.token.email ||
+        (resource.data.destinatarioPerfil == 'Líder' && isLider())
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        isLider() ||
+        resource.data.destinatarioEmail == request.auth.token.email
+      );
+      allow delete: if isAdmin() || isLider();
+    }
+
+    // ---------------------------------------------------------
     // Core Application Collections
     // ---------------------------------------------------------
     match /imoveis/{imovelId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('imoveis') || hasPermission('cadastro_imoveis') || hasPermission('meus_imoveis') || isLider() || isAdmin();
     }
 
     match /counters/{counterId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isSignedIn();
     }
 
     match /leads/{leadId} {
       allow create: if true;
-      allow read: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow read, update, delete: if hasPermission('crm') || hasPermission('clientes');
     }
 
     match /property_submissions/{submissionId} {
       allow create: if isSignedIn();
-      allow read, update, delete: if isAdmin();
+      allow read, update, delete: if hasPermission('crm') || hasPermission('aprovar_imovel');
     }
 
     match /visits/{visitId} {
       allow create: if true;
       allow read: if true;
-      allow update, delete: if isAdmin();
+      allow update, delete: if hasPermission('crm') || hasPermission('visitas') || hasPermission('agenda');
     }
 
     match /blocked_slots/{slotId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('agenda');
     }
 
     match /favorites/{userId} {
@@ -85,135 +128,103 @@ service cloud.firestore {
 
     match /corretores/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('imoveis');
     }
 
     match /proprietarios/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('clientes');
     }
 
     match /locacoes/{id} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read: if hasPermission('locacoes') || hasPermission('financeiro');
+      allow write: if hasPermission('locacoes') || hasPermission('financeiro');
     }
 
     match /financeiro/{id} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read: if hasPermission('financeiro') || hasPermission('financeiro_leitura');
+      allow write: if hasPermission('financeiro');
     }
 
     match /transacoesFinanceiras/{id} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow read: if hasPermission('financeiro') || hasPermission('financeiro_leitura');
+      allow write: if hasPermission('financeiro');
     }
 
     match /agendamentos/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('agenda');
     }
 
     match /visitas/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('visitas');
     }
 
     match /solicitacoes/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('crm') || hasPermission('aprovar_imovel');
     }
 
     // ---------------------------------------------------------
-    // Dynamic Dropdown Config Options & Settings Collections
+    // Config Options, Settings, and Agreements
     // ---------------------------------------------------------
     match /siteSettings/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasPermission('configuracoes');
     }
 
-    match /propostas/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /contrapropostas/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /aceitesProposta/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /contratos/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /contratosLocacao/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /recibos/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /documentosGerados/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /clausulas/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /contractClauses/{id} { allow read: if true; allow write: if isAdmin(); }
-
-    match /categoriasImovel/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
+    match /propostas/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('propostas') || hasPermission('contratos'); 
+    }
+    match /contrapropostas/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('propostas') || hasPermission('contratos'); 
+    }
+    match /aceitesProposta/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('propostas') || hasPermission('contratos'); 
+    }
+    match /contratos/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('contratos'); 
+    }
+    match /contratosLocacao/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('contratos') || hasPermission('locacoes'); 
+    }
+    match /recibos/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('financeiro') || hasPermission('locacoes'); 
+    }
+    match /documentosGerados/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('crm') || hasPermission('contratos') || hasPermission('documentos'); 
+    }
+    match /clausulas/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('configuracoes') || hasPermission('contratos'); 
+    }
+    match /contractClauses/{id} { 
+      allow read: if true; 
+      allow write: if hasPermission('configuracoes') || hasPermission('contratos'); 
     }
 
-    match /tiposImovel/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /tiposNegocio/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /statusImovel/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /cidades/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /bairros/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /caracteristicas/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /ambientes/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /caracteristicasEmpreendimento/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /lazer/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /instalacoes/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /acabamentos/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /proximidades/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /faixasPreco/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    match /caracteristicasApartamento/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
+    match /categoriasImovel/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /tiposImovel/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /tiposNegocio/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /statusImovel/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /cidades/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /bairros/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /caracteristicas/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /ambientes/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /caracteristicasEmpreendimento/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /lazer/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /instalacoes/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /acabamentos/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /proximidades/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /faixasPreco/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
+    match /caracteristicasApartamento/{id} { allow read: if true; allow write: if hasPermission('configuracoes'); }
   }
 }

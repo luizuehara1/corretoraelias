@@ -39,51 +39,161 @@ export const checkIsAdmin = async (uid: string | undefined): Promise<boolean> =>
 };
 
 /**
- * Checks if a user is an admin by looking at a "whitelist" in Firestore
- * or a hardcoded list for initial setup.
- * If the user is on the whitelist but does not have a record in Firestore,
- * we automatically provision the record securely.
+ * Core CRM Roles and Permissions definition
+ */
+export const CRM_PERMISSIONS: Record<string, string[]> = {
+  "Administrador": ["*"],
+  "Líder": ["crm", "aprovar_imovel", "publicar_imovel", "reprovar_imovel", "solicitar_alteracoes", "contratos", "clientes", "visitas", "agenda", "imoveis", "financeiro_leitura", "usuarios"],
+  "Corretor": ["crm", "clientes", "agenda", "visitas", "propostas", "contratos", "meus_imoveis"],
+  "Assistente": ["crm", "clientes", "agenda", "visitas", "cadastro_imoveis", "documentos"],
+  "Financeiro": ["financeiro", "relatorios", "locacoes", "comissoes"],
+  "Marketing": ["publicacoes", "seo", "blog", "imoveis"],
+  "Proprietário": []
+};
+
+/**
+ * Loads user profile by checking UID and email in the standardized "usuarios" collection.
+ * Provides fallback to legacy collections and whitelists, with automatic initial provisioning.
+ */
+export const carregarPerfilSeguro = async (user: User | null): Promise<any> => {
+  if (!user) return null;
+
+  const uid = user.uid;
+  const email = user.email?.toLowerCase() || '';
+
+  // 1. Direct Lookup by UID in "usuarios"
+  try {
+    const snap = await getDoc(doc(db, "usuarios", uid));
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() };
+    }
+  } catch (error) {
+    console.warn("Erro ao buscar usuário por UID:", error);
+  }
+
+  // 2. Email Lookup for Pre-Registered users in "usuarios"
+  if (email) {
+    try {
+      const q = query(collection(db, "usuarios"), where("email", "==", email));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        const docSnap = qSnap.docs[0];
+        const data = docSnap.data();
+        
+        // Map the UID to this pre-registered document
+        const updatedData = { 
+          ...data, 
+          uid: uid, 
+          foto: user.photoURL || data.foto || "",
+          updatedAt: new Date().toISOString() 
+        };
+        
+        await setDoc(doc(db, "usuarios", uid), updatedData);
+        if (docSnap.id !== uid) {
+          try {
+            await deleteDoc(doc(db, "usuarios", docSnap.id));
+          } catch (delErr) {
+            console.warn("Could not delete legacy pre-registered doc:", delErr);
+          }
+        }
+        return { id: uid, ...updatedData };
+      }
+    } catch (error) {
+      console.warn("Erro ao buscar usuário pré-cadastrado por email:", error);
+    }
+  }
+
+  // 3. Fallback to Initial Administrator Whitelist
+  const whitelist = ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br', 'eliasborgess@hotmail.com'];
+  if (email && whitelist.includes(email)) {
+    const adminData = {
+      uid: uid,
+      nome: user.displayName || "Administrador Inicial",
+      email: email,
+      telefone: "",
+      cargo: "Administrador",
+      perfil: "Administrador",
+      permissoes: ["*"],
+      status: "Ativo",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await setDoc(doc(db, "usuarios", uid), adminData);
+      return { id: uid, ...adminData };
+    } catch (err) {
+      console.warn("Erro ao registrar admin inicial whitelist:", err);
+    }
+    return { id: uid, ...adminData };
+  }
+
+  // 4. Backward compatibility with legacy collections
+  const caminhos = [
+    ["admins", uid],
+    ["administradores", uid],
+    ["users", uid],
+    ["perfis", uid],
+    ["profiles", uid],
+    ["proprietarios", uid]
+  ];
+
+  for (const [colecao, id] of caminhos) {
+    try {
+      const snap = await getDoc(doc(db, colecao, id));
+      if (snap.exists()) {
+        const data = snap.data();
+        const isLegacyAdmin = ["admins", "administradores"].includes(colecao);
+        const mappedData = {
+          uid: uid,
+          nome: data.nome || data.name || user.displayName || "Usuário",
+          email: email,
+          telefone: data.telefone || data.phone || "",
+          cargo: isLegacyAdmin ? "Administrador" : (data.cargo || "Proprietário"),
+          perfil: isLegacyAdmin ? "Administrador" : (data.perfil || "Proprietário"),
+          permissoes: isLegacyAdmin ? ["*"] : (data.permissoes || []),
+          status: "Ativo",
+          foto: user.photoURL || data.foto || "",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        // Migrate to "usuarios" collection
+        await setDoc(doc(db, "usuarios", uid), mappedData);
+        return { id: uid, ...mappedData };
+      }
+    } catch (error) {
+      console.warn(`Erro ao carregar perfil em ${colecao}:`, error);
+    }
+  }
+
+  // 5. Default to Proprietário (Portal do Proprietário)
+  return {
+    uid,
+    email,
+    nome: user.displayName || "Usuário Proprietário",
+    foto: user.photoURL || "",
+    perfil: "Proprietário",
+    cargo: "Proprietário",
+    status: "Ativo",
+    permissoes: []
+  };
+};
+
+/**
+ * Checks if a user has any CRM access (role other than Proprietário).
+ * Replaces the old single-admin verification to grant dashboard entry.
  */
 export const checkIfAdmin = async (user: User | null): Promise<boolean> => {
   if (!user) return false;
-  
-  // Whitelist hardcoded based on the current user email provided in metadata
-  const whitelist = ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br'];
-  const isWhitelisted = whitelist.includes(user.email || '');
-
   try {
-    const existsInDb = await checkIsAdmin(user.uid);
-
-    if (existsInDb) {
-      return true;
-    }
-
-    // Provision automatically if whitelisted but not in DB yet
-    if (isWhitelisted) {
-      console.log(`Usuário herda permissão da lista. Provisionando registro admins/${user.uid} automaticamente...`);
-      try {
-        await setDoc(doc(db, "admins", user.uid), {
-          uid: user.uid,
-          email: user.email || '',
-          nome: user.displayName || user.email?.split('@')[0] || 'Administrador',
-          role: "admin",
-          ativo: true,
-          createdAt: serverTimestamp()
-        });
-      } catch (err) {
-        console.warn("Erro ao registrar admin no firestore, prosseguindo por estar na lista:", err);
-      }
-      return true;
-    }
-
-    return false;
+    const profile = await carregarPerfilSeguro(user);
+    if (!profile) return false;
+    // Authorized for CRM if they are not a standard Proprietário
+    return ["Administrador", "Líder", "Corretor", "Assistente", "Financeiro", "Marketing"].includes(profile.perfil);
   } catch (error) {
-    console.error("Error checking or provisioning admin status:", error);
-    // Safe fallback to email whitelist if Firestore fails
-    if (isWhitelisted) {
-      return true;
-    }
-    return false;
+    console.error("Erro em checkIfAdmin:", error);
+    // Hardcoded whitelist safety net
+    const whitelist = ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br', 'eliasborgess@hotmail.com'];
+    return whitelist.includes(user.email?.toLowerCase() || '');
   }
 };
 
@@ -1535,6 +1645,107 @@ export const subscribeToFavorites = (userId: string, callback: (propertyIds: str
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => doc.id));
   });
+};
+
+/**
+ * Listens to all registered system users in real-time
+ */
+export const subscribeToUsers = (callback: (users: any[]) => void) => {
+  const q = collection(db, "usuarios");
+  return onSnapshot(q, (snapshot) => {
+    const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    list.sort((a: any, b: any) => (a.nome || '').localeCompare(b.nome || ''));
+    callback(list);
+  });
+};
+
+/**
+ * Creates or updates a user document in the "usuarios" collection
+ */
+export const salvarUsuario = async (userId: string | null, userData: any) => {
+  try {
+    const emailLower = String(userData.email || '').trim().toLowerCase();
+    const finalId = userId || emailLower;
+    
+    const docRef = doc(db, "usuarios", finalId);
+    const docData = {
+      ...userData,
+      email: emailLower,
+      updatedAt: new Date().toISOString()
+    };
+    if (!userId) {
+      docData.createdAt = new Date().toISOString();
+    }
+    
+    await setDoc(docRef, docData, { merge: true });
+    return { success: true, id: finalId };
+  } catch (error) {
+    console.error("Erro ao salvar usuário:", error);
+    throw error;
+  }
+};
+
+/**
+ * Deletes a user document
+ */
+export const deletarUsuario = async (userId: string) => {
+  try {
+    await deleteDoc(doc(db, "usuarios", userId));
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao deletar usuário:", error);
+    throw error;
+  }
+};
+
+/**
+ * Listens to in-app notifications in real-time
+ */
+export const subscribeToNotifications = (callback: (notifs: any[]) => void, email?: string, perfil?: string) => {
+  const q = query(collection(db, "notificacoes"), orderBy("createdAt", "desc"));
+  return onSnapshot(q, (snapshot) => {
+    let list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (email || perfil) {
+      list = list.filter((n: any) => {
+        const matchesEmail = email && String(n.destinatarioEmail || '').toLowerCase() === email.toLowerCase();
+        const matchesPerfil = perfil && n.destinatarioPerfil === perfil;
+        return matchesEmail || matchesPerfil || n.destinatarioPerfil === '*';
+      });
+    }
+    callback(list);
+  });
+};
+
+/**
+ * Creates a new in-app notification
+ */
+export const criarNotificacao = async (notifData: any) => {
+  try {
+    const docRef = await addDoc(collection(db, "notificacoes"), {
+      ...notifData,
+      lido: false,
+      createdAt: new Date().toISOString()
+    });
+    return { success: true, id: docRef.id };
+  } catch (error) {
+    console.error("Erro ao criar notificação:", error);
+    return { success: false, error };
+  }
+};
+
+/**
+ * Marks a specific in-app notification as read
+ */
+export const marcarNotificacaoComoLida = async (notifId: string) => {
+  try {
+    await updateDoc(doc(db, "notificacoes", notifId), {
+      lido: true
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Erro ao marcar notificação como lida:", error);
+    return { success: false, error };
+  }
 };
 
 export { onAuthStateChanged };

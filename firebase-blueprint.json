@@ -96,9 +96,55 @@
         "facebook": { "type": "string" },
         "linkedin": { "type": "string" }
       }
+    },
+    "usuario": {
+      "title": "Usuário",
+      "description": "Dados do usuário com perfil de acesso e permissões",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "nome": { "type": "string" },
+        "email": { "type": "string" },
+        "telefone": { "type": "string" },
+        "cargo": { "type": "string" },
+        "creci": { "type": "string" },
+        "perfil": { "type": "string", "enum": ["Administrador", "Líder", "Corretor", "Assistente", "Financeiro", "Marketing", "Proprietário"] },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo", "Bloqueado", "Férias"] },
+        "permissoes": { "type": "array" },
+        "equipe": { "type": "string" },
+        "supervisor": { "type": "string" },
+        "foto": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "nome", "perfil", "status"]
+    },
+    "notificacao": {
+      "title": "Notificação",
+      "description": "Notificação de fluxo de aprovação ou sistema",
+      "type": "object",
+      "properties": {
+        "tipo": { "type": "string" },
+        "destinatarioEmail": { "type": "string" },
+        "destinatarioPerfil": { "type": "string" },
+        "mensagem": { "type": "string" },
+        "imovelId": { "type": "string" },
+        "imovelTitulo": { "type": "string" },
+        "lido": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["mensagem", "lido"]
     }
   },
   "firestore": {
+    "/usuarios/{usuarioId}": {
+      "schema": "usuario",
+      "description": "Coleção de perfis de usuário do sistema"
+    },
+    "/notificacoes/{notificacaoId}": {
+      "schema": "notificacao",
+      "description": "Mensagens de notificação do sistema"
+    },
     "/imoveis/{imovelId}": {
       "schema": "property",
       "description": "Catálogo de imóveis aprovados (imoveis)"

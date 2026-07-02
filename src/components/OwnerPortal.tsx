@@ -53,10 +53,18 @@ import {
   User,
   Sparkles,
   Copy,
-  ShieldAlert
+  ShieldAlert,
+  Users,
+  Bell,
+  Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db, auth, logout, loginWithGoogle, submitProperty, getSubmissions, approveProperty, rejectProperty, getPrefixoCodigoImovel, obterPreviaCodigoImovel, seedDefaultSettingsIfEmpty } from '../lib/firebase';
+import { 
+  db, auth, logout, loginWithGoogle, submitProperty, getSubmissions, approveProperty, rejectProperty, 
+  getPrefixoCodigoImovel, obterPreviaCodigoImovel, seedDefaultSettingsIfEmpty,
+  CRM_PERMISSIONS, carregarPerfilSeguro, subscribeToUsers, salvarUsuario, deletarUsuario, 
+  subscribeToNotifications, criarNotificacao, marcarNotificacaoComoLida 
+} from '../lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { exportReportToPDF } from '../lib/pdfExport';
 import ConfigOptionManager from './ConfigOptionManager';
@@ -429,43 +437,7 @@ async function podeSincronizarOpcoes(user: any): Promise<boolean> {
   }
 }
 
-async function carregarPerfilSeguro(user: any): Promise<any> {
-  if (!user) return null;
-
-  const uid = user.uid;
-  const email = user.email?.toLowerCase();
-
-  const caminhos = [
-    ["usuarios", uid],
-    ["users", uid],
-    ["perfis", uid],
-    ["profiles", uid],
-    ["proprietarios", uid]
-  ];
-
-  for (const [colecao, id] of caminhos) {
-    try {
-      const snap = await getDoc(doc(db, colecao, id));
-
-      if (snap.exists()) {
-        return {
-          id: snap.id,
-          ...snap.data()
-        };
-      }
-    } catch (error) {
-      console.warn(`Erro ao carregar perfil em ${colecao}:`, error);
-    }
-  }
-
-  return {
-    uid,
-    email,
-    nome: user.displayName || "Usuário",
-    foto: user.photoURL || "",
-    role: "proprietario"
-  };
-}
+// carregarPerfilSeguro is imported from firebase.ts
 
 async function carregarFinanceiroSeguro(user: any): Promise<any[]> {
   if (!user) return [];
@@ -1535,6 +1507,108 @@ export default function OwnerPortal({
   const [isOwnerModalOpen, setIsOwnerModalOpen] = useState(false);
   const [editingOwner, setEditingOwner] = useState<any | null>(null);
 
+  // Users CRM States
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  
+  // Form fields for adding/editing users
+  const [formUser, setFormUser] = useState({
+    nome: '',
+    email: '',
+    telefone: '',
+    creci: '',
+    cargo: 'Corretor',
+    perfil: 'Corretor',
+    status: 'Ativo',
+    equipe: '',
+    supervisor: '',
+    foto: ''
+  });
+
+  const handleSaveUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (!formUser.nome || !formUser.email) {
+        alert("Nome e Email são obrigatórios.");
+        return;
+      }
+      
+      const userData = {
+        ...formUser,
+        id: editingUser?.id || '',
+        updatedAt: new Date().toISOString()
+      };
+      
+      await salvarUsuario(editingUser?.id || null, userData);
+      alert("Usuário salvo com sucesso!");
+      setIsUserModalOpen(false);
+      setEditingUser(null);
+      setFormUser({
+        nome: '',
+        email: '',
+        telefone: '',
+        creci: '',
+        cargo: 'Corretor',
+        perfil: 'Corretor',
+        status: 'Ativo',
+        equipe: '',
+        supervisor: '',
+        foto: ''
+      });
+    } catch (err: any) {
+      alert("Erro ao salvar usuário: " + err.message);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (confirm("Deseja realmente remover este usuário do CRM?")) {
+      try {
+        await deletarUsuario(userId);
+        alert("Usuário removido com sucesso!");
+      } catch (err: any) {
+        alert("Erro ao remover usuário: " + err.message);
+      }
+    }
+  };
+
+  // Notifications States
+  const [notificationsList, setNotificationsList] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  // Frontend Permission check
+  const temPermissao = (permissao: string): boolean => {
+    const userRole = profile?.perfil || "Proprietário";
+    const userPerms = CRM_PERMISSIONS[userRole] || [];
+    if (userPerms.includes("*")) return true;
+    return userPerms.includes(permissao);
+  };
+
+  const itemPermissions: Record<string, string> = {
+    'dashboard': 'crm',
+    'inventory': 'crm',
+    'add_property_tab': 'crm',
+    'rentals': 'locacoes',
+    'contracts': 'contratos',
+    'financial': 'financeiro_leitura',
+    'visits': 'visitas',
+    'submissions': 'crm',
+    'brokers': 'usuarios',
+    'neighborhoods': 'usuarios',
+    'owners': 'crm',
+    'siteSettings': 'configuracoes',
+    'usuariosCRM': 'usuarios'
+  };
+
+  const isItemAllowed = (itemId: string): boolean => {
+    if (profile?.perfil === "Administrador") return true;
+    const reqPerm = itemPermissions[itemId];
+    if (!reqPerm) return true;
+    if (itemId === 'financial' && temPermissao('financeiro')) return true;
+    return temPermissao(reqPerm);
+  };
+
   const [siteSettings, setSiteSettings] = useState<any>({
     title: "RB Sorocaba Negócios Imobiliários",
     phone: "(15) 99114-3213",
@@ -2351,6 +2425,28 @@ export default function OwnerPortal({
     loadDashboardData();
   }, [currentUser, properties, scheduledVisits, financialList]);
 
+  // Load CRM Users and in-app Notifications in real-time
+  useEffect(() => {
+    if (!currentUser) return;
+
+    setUsersLoading(true);
+    const unsubUsers = subscribeToUsers((users) => {
+      setUsersList(users);
+      setUsersLoading(false);
+    });
+
+    const email = currentUser.email || '';
+    const userRole = profile?.perfil || "Proprietário";
+    const unsubNotifs = subscribeToNotifications((notifs) => {
+      setNotificationsList(notifs);
+    }, email, userRole);
+
+    return () => {
+      unsubUsers();
+      unsubNotifs();
+    };
+  }, [currentUser, profile?.perfil]);
+
   // Profile Save handler
   const handleSaveProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -3149,8 +3245,27 @@ export default function OwnerPortal({
           : [];
       };
 
+      // Attach statusNotes to the last log entry in approvalHistory if present
+      let finalHistory = Array.isArray(newProperty.approvalHistory) ? [...newProperty.approvalHistory] : [];
+      if (newProperty.statusNotes && finalHistory.length > 0) {
+        finalHistory[finalHistory.length - 1].observacoes = newProperty.statusNotes;
+      } else if (newProperty.statusNotes && finalHistory.length === 0) {
+        // Create initial log entry if it didn't exist but notes were typed
+        finalHistory.push({
+          data: new Date().toISOString(),
+          usuario: profile?.name || profile?.nome || currentUser?.email || 'Sistema',
+          perfil: profile?.perfil || 'Administrador',
+          de: 'Rascunho',
+          para: newProperty.approvalStatus || 'Rascunho',
+          observacoes: newProperty.statusNotes
+        });
+      }
+
       const propertyData = {
         ...newProperty,
+        approvalStatus: newProperty.approvalStatus || 'Rascunho',
+        approvalHistory: finalHistory,
+        statusNotes: '', // reset in DB
         priceValue: priceVal,
         tipoNegocio: businessType,
         purpose: businessType,
@@ -4192,6 +4307,7 @@ export default function OwnerPortal({
     { id: 'neighborhoods', label: 'Bairros & Cadastros', icon: MapPin },
     { id: 'owners', label: 'Proprietários', icon: User },
     { id: 'siteSettings', label: 'Configurações do Site', icon: Settings },
+    { id: 'usuariosCRM', label: 'Usuários e Permissões', icon: Users },
   ];
 
   return (
@@ -4231,25 +4347,25 @@ export default function OwnerPortal({
               [
                 {
                   title: "Principal",
-                  items: menuItems.filter(item => ['dashboard'].includes(item.id))
+                  items: menuItems.filter(item => ['dashboard'].includes(item.id) && isItemAllowed(item.id))
                 },
                 {
                   title: "Operações",
-                  items: menuItems.filter(item => ['inventory', 'add_property_tab', 'rentals', 'contracts', 'visits', 'submissions'].includes(item.id))
+                  items: menuItems.filter(item => ['inventory', 'add_property_tab', 'rentals', 'contracts', 'visits', 'submissions'].includes(item.id) && isItemAllowed(item.id))
                 },
                 {
                   title: "Finanças",
-                  items: menuItems.filter(item => ['financial'].includes(item.id))
+                  items: menuItems.filter(item => ['financial'].includes(item.id) && isItemAllowed(item.id))
                 },
                 {
                   title: "Cadastros",
-                  items: menuItems.filter(item => ['brokers', 'neighborhoods', 'owners'].includes(item.id))
+                  items: menuItems.filter(item => ['brokers', 'neighborhoods', 'owners'].includes(item.id) && isItemAllowed(item.id))
                 },
                 {
                   title: "Configurações",
-                  items: menuItems.filter(item => ['siteSettings'].includes(item.id))
+                  items: menuItems.filter(item => ['siteSettings', 'usuariosCRM'].includes(item.id) && isItemAllowed(item.id))
                 }
-              ].map((group) => (
+              ].filter(group => group.items.length > 0).map((group) => (
                 <div key={group.title} className="space-y-1.5">
                   <div className="px-3 text-[10px] font-bold tracking-[0.15em] text-[#7A7F8C] uppercase leading-none mb-3 mt-4 first:mt-0">
                     {group.title}
@@ -6327,6 +6443,186 @@ export default function OwnerPortal({
                           </table>
                         </div>
                       )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* USUARIOS CRM - CONTROLE DE ACESSO E PERMISSÕES */}
+              {activeTab === 'usuariosCRM' && !showAddForm && (
+                <div className="space-y-8 animate-fade-in text-left">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <h3 className="text-xl font-extrabold text-[#050505] uppercase tracking-widest flex items-center gap-2">
+                        <Users size={22} className="text-amber-500" />
+                        Usuários & Controle de Permissões
+                      </h3>
+                      <p className="text-xs text-[#A1A1AA] font-bold uppercase tracking-wider mt-1.5">
+                        Defina cargos, perfis de acesso e status de corretores, gerentes, financeiros e proprietários
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingUser(null);
+                        setFormUser({
+                          nome: '',
+                          email: '',
+                          telefone: '',
+                          creci: '',
+                          cargo: 'Corretor',
+                          perfil: 'Corretor',
+                          status: 'Ativo',
+                          equipe: '',
+                          supervisor: '',
+                          foto: ''
+                        });
+                        setIsUserModalOpen(true);
+                      }}
+                      className="bg-[#050505] text-amber-500 hover:bg-[#121212] hover:text-amber-400 border border-neutral-900 px-6 py-3 rounded-lg text-[10px] font-extrabold uppercase tracking-widest flex items-center gap-2 transition-all shadow cursor-pointer"
+                    >
+                      <Plus size={14} /> Novo Usuário CRM
+                    </button>
+                  </div>
+
+                  {usersLoading ? (
+                    <div className="p-12 text-center bg-white border border-[#EFEFEA] rounded-2xl flex flex-col items-center justify-center space-y-3">
+                      <Loader2 size={24} className="animate-spin text-amber-500" />
+                      <p className="text-[10px] font-bold text-[#A1A1AA] uppercase tracking-widest">Sincronizando banco de usuários...</p>
+                    </div>
+                  ) : usersList.length === 0 ? (
+                    <div className="bg-white border border-[#EFEFEA] rounded-2xl p-12 text-center space-y-4">
+                      <Users size={32} className="mx-auto text-amber-500/45" />
+                      <p className="text-stone-500 font-medium text-xs leading-relaxed">Nenhum usuário cadastrado no controle de acesso.</p>
+                      <button
+                        onClick={() => {
+                          setEditingUser(null);
+                          setFormUser({
+                            nome: 'Corretor Exemplo',
+                            email: 'corretor@rbsorocaba.com.br',
+                            telefone: '(15) 99123-4567',
+                            creci: '123456-F',
+                            cargo: 'Corretor Associado',
+                            perfil: 'Corretor',
+                            status: 'Ativo',
+                            equipe: 'Vendas Campolim',
+                            supervisor: 'Gerente Carlos',
+                            foto: ''
+                          });
+                          setIsUserModalOpen(true);
+                        }}
+                        className="text-amber-500 hover:text-amber-600 text-xs font-black uppercase tracking-widest cursor-pointer"
+                      >
+                        Inicializar com Exemplo
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-[#EFEFEA] rounded-2xl overflow-hidden shadow-sm">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-[#EFEFEA] bg-[#FDFDFD] text-[10px] font-black uppercase tracking-wider text-stone-400">
+                              <th className="py-4 px-6">Usuário</th>
+                              <th className="py-4 px-6">Contato / CRECI</th>
+                              <th className="py-4 px-6">Perfil / Cargo</th>
+                              <th className="py-4 px-6">Equipe / Supervisor</th>
+                              <th className="py-4 px-6">Status</th>
+                              <th className="py-4 px-6 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usersList.map((usr: any) => (
+                              <tr key={usr.id} className="border-b border-[#F6F6F4] hover:bg-[#FAF9F6] text-xs transition-all">
+                                <td className="py-4 px-6">
+                                  <div className="flex items-center space-x-3">
+                                    {usr.foto ? (
+                                      <img src={usr.foto} alt={usr.nome} className="w-9 h-9 rounded-full object-cover border border-amber-500/10" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <div className="w-9 h-9 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 text-[11px] font-black">
+                                        {(usr.nome || 'U').substring(0, 1)}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <p className="font-extrabold text-stone-900 leading-none">{usr.nome}</p>
+                                      <p className="text-[10px] text-slate-400 font-bold mt-1">{usr.email}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-6 font-bold text-stone-700">
+                                  <p>{usr.telefone || 'Sem telefone'}</p>
+                                  {usr.creci && <p className="text-[9px] text-[#F5B400] uppercase mt-0.5 font-black">CRECI: {usr.creci}</p>}
+                                </td>
+                                <td className="py-4 px-6 font-bold text-stone-800">
+                                  <div className="flex flex-col space-y-1">
+                                    <span className={`inline-block px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest text-center max-w-max ${
+                                      usr.perfil === 'Administrador' ? 'bg-amber-100 text-amber-800' :
+                                      usr.perfil === 'Líder' ? 'bg-blue-100 text-blue-800' :
+                                      usr.perfil === 'Corretor' ? 'bg-emerald-100 text-emerald-800' :
+                                      usr.perfil === 'Financeiro' ? 'bg-purple-100 text-purple-800' :
+                                      usr.perfil === 'Marketing' ? 'bg-pink-100 text-pink-800' :
+                                      usr.perfil === 'Assistente' ? 'bg-teal-100 text-teal-800' :
+                                      'bg-stone-100 text-stone-700'
+                                    }`}>
+                                      {usr.perfil}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 font-medium pl-1">{usr.cargo || 'Membro'}</span>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-6 text-stone-700 font-bold">
+                                  <p>{usr.equipe || '-'}</p>
+                                  {usr.supervisor && <p className="text-[10px] text-slate-400 font-medium">Supervisor: {usr.supervisor}</p>}
+                                </td>
+                                <td className="py-4 px-6">
+                                  <span className={`inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider ${
+                                    usr.status === 'Ativo' ? 'text-emerald-600' :
+                                    usr.status === 'Férias' ? 'text-amber-500' :
+                                    usr.status === 'Bloqueado' ? 'text-red-500' :
+                                    'text-slate-400'
+                                  }`}>
+                                    <span className={`w-2 h-2 rounded-full ${
+                                      usr.status === 'Ativo' ? 'bg-emerald-500' :
+                                      usr.status === 'Férias' ? 'bg-amber-500' :
+                                      usr.status === 'Bloqueado' ? 'bg-red-500' :
+                                      'bg-slate-400'
+                                    }`} />
+                                    {usr.status || 'Ativo'}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-6 text-right">
+                                  <div className="flex items-center justify-end space-x-3">
+                                    <button
+                                      onClick={() => {
+                                        setEditingUser(usr);
+                                        setFormUser({
+                                          nome: usr.nome || '',
+                                          email: usr.email || '',
+                                          telefone: usr.telefone || '',
+                                          creci: usr.creci || '',
+                                          cargo: usr.cargo || 'Corretor',
+                                          perfil: usr.perfil || 'Corretor',
+                                          status: usr.status || 'Ativo',
+                                          equipe: usr.equipe || '',
+                                          supervisor: usr.supervisor || '',
+                                          foto: usr.foto || ''
+                                        });
+                                        setIsUserModalOpen(true);
+                                      }}
+                                      className="text-stone-500 hover:text-amber-500 text-[10px] font-black uppercase tracking-widest cursor-pointer"
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteUser(usr.id)}
+                                      className="text-red-500 hover:text-red-600 text-[10px] font-black uppercase tracking-widest cursor-pointer"
+                                    >
+                                      Excluir
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -9428,6 +9724,125 @@ export default function OwnerPortal({
                             </div>
                           </div>
 
+                          {/* FLUXO DE APROVAÇÃO E HISTÓRICO - CONTROLE CRM */}
+                          <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-4 shadow-sm text-left">
+                            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                              <ShieldAlert size={16} className="text-amber-500" />
+                              <span className="text-[10px] font-black uppercase text-stone-900 tracking-wider">Fluxo de Aprovação & Controle Interno</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                <label className="text-[9px] font-black uppercase text-stone-600 block">Status de Aprovação Atual</label>
+                                {temPermissao('aprovar_imovel') ? (
+                                  <select
+                                    className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                                    value={newProperty.approvalStatus || 'Rascunho'}
+                                    onChange={(e) => {
+                                      const newStatus = e.target.value;
+                                      const currentHist = Array.isArray(newProperty.approvalHistory) ? newProperty.approvalHistory : [];
+                                      const logEntry = {
+                                        data: new Date().toISOString(),
+                                        usuario: profile?.name || profile?.nome || currentUser?.email || 'Sistema',
+                                        perfil: profile?.perfil || 'Administrador',
+                                        de: newProperty.approvalStatus || 'Rascunho',
+                                        para: newStatus,
+                                        observacoes: ''
+                                      };
+                                      setNewProperty({
+                                        ...newProperty,
+                                        approvalStatus: newStatus,
+                                        approvalHistory: [...currentHist, logEntry]
+                                      });
+                                    }}
+                                  >
+                                    <option value="Rascunho">Rascunho (Rascunho)</option>
+                                    <option value="Em análise">Em análise (Em análise)</option>
+                                    <option value="Aguardando aprovação">Aguardando aprovação (Solicitar Alterações)</option>
+                                    <option value="Aprovado">Aprovado (Aprovado)</option>
+                                    <option value="Publicado">Publicado (Publicado no Site)</option>
+                                    <option value="Reprovado">Reprovado (Reprovado)</option>
+                                    <option value="Arquivado">Arquivado (Arquivado)</option>
+                                  </select>
+                                ) : (
+                                  <div className="flex items-center justify-between p-3 bg-stone-50 rounded-xl border border-stone-200">
+                                    <span className="text-xs font-extrabold text-stone-800">
+                                      {newProperty.approvalStatus || 'Rascunho'}
+                                    </span>
+                                    {['Rascunho', 'Reprovado'].includes(newProperty.approvalStatus || 'Rascunho') && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const currentHist = Array.isArray(newProperty.approvalHistory) ? newProperty.approvalHistory : [];
+                                          const logEntry = {
+                                            data: new Date().toISOString(),
+                                            usuario: profile?.name || profile?.nome || currentUser?.email || 'Usuário',
+                                            perfil: profile?.perfil || 'Corretor',
+                                            de: newProperty.approvalStatus || 'Rascunho',
+                                            para: 'Em análise',
+                                            observacoes: 'Submetido para análise pelo corretor'
+                                          };
+                                          setNewProperty({
+                                            ...newProperty,
+                                            approvalStatus: 'Em análise',
+                                            approvalHistory: [...currentHist, logEntry]
+                                          });
+                                          alert("Imóvel enviado para análise da gerência!");
+                                        }}
+                                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-stone-950 text-[9px] font-black uppercase tracking-widest rounded-lg cursor-pointer"
+                                      >
+                                        Enviar para Análise
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="text-[9px] font-black uppercase text-stone-600 block">Observações / Solicitação de Alteração</label>
+                                <input
+                                  type="text"
+                                  placeholder="Digite observações sobre a mudança de status ou correções necessárias..."
+                                  className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-medium text-stone-800 outline-none focus:ring-1 focus:ring-amber-500"
+                                  value={newProperty.statusNotes || ''}
+                                  onChange={(e) => {
+                                    setNewProperty({
+                                      ...newProperty,
+                                      statusNotes: e.target.value
+                                    });
+                                  }}
+                                />
+                              </div>
+
+                              <div className="col-span-1 md:col-span-2 space-y-2 mt-2">
+                                <label className="text-[9px] font-black uppercase text-stone-500 block border-b border-slate-100 pb-1">Histórico de Alterações de Status</label>
+                                {(!newProperty.approvalHistory || newProperty.approvalHistory.length === 0) ? (
+                                  <p className="text-[10px] text-slate-400 italic font-semibold">Nenhum histórico registrado.</p>
+                                ) : (
+                                  <div className="space-y-1.5 max-h-40 overflow-y-auto no-scrollbar pr-1">
+                                    {(newProperty.approvalHistory as any[]).map((log: any, i: number) => (
+                                      <div key={i} className="flex gap-2 text-[10px] bg-stone-50 p-2.5 rounded-xl border border-stone-100 leading-normal font-medium text-stone-850">
+                                        <div className="shrink-0 text-amber-600 font-extrabold uppercase text-[8px] tracking-wider pt-0.5">
+                                          {new Date(log.data).toLocaleDateString('pt-BR')} {new Date(log.data).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                                        </div>
+                                        <div className="flex-1">
+                                          <p>
+                                            <span className="font-extrabold text-stone-900">{log.usuario}</span> ({log.perfil}) alterou de <span className="font-bold text-slate-500">"{log.de}"</span> para <span className="font-extrabold text-amber-700">"{log.para}"</span>
+                                          </p>
+                                          {log.observacoes && (
+                                            <p className="text-stone-500 mt-0.5 text-[9px] italic bg-amber-500/5 p-1 rounded-md border border-amber-500/10">
+                                              💬 "{log.observacoes}"
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
                           {/* LEGACY FIELDS REMOVED AND REFACTORED TO REGRAS DE NEGOCIO */}
 
                         </div>
@@ -10136,6 +10551,190 @@ export default function OwnerPortal({
                   cancelar
                 </button>
               </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 4. CRM USER EDIT/CREATE DIALOG */}
+        <AnimatePresence>
+          {isUserModalOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1200] bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+            >
+              <motion.div 
+                initial={{ scale: 0.95, y: 15 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 15 }}
+                className="bg-white border border-[#EFEFEA] rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl my-8 text-left"
+              >
+                <div className="p-6 border-b border-[#F6F6F4] bg-[#050505] text-[#F1F1ED] flex justify-between items-center">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-[#F1F1ED]">
+                      {editingUser ? "Editar Usuário CRM" : "Novo Usuário CRM"}
+                    </h4>
+                    <p className="text-[9px] text-[#A1A1AA] font-bold uppercase tracking-widest mt-0.5">RB Sorocaba Controle de Acesso</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsUserModalOpen(false)}
+                    className="p-1.5 hover:bg-zinc-800 rounded-lg text-[#A1A1AA] hover:text-[#F1F1ED] cursor-pointer"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveUser} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto no-scrollbar">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Nome Completo *</label>
+                    <input 
+                      type="text" 
+                      required 
+                      className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                      value={formUser.nome} 
+                      onChange={e => setFormUser({...formUser, nome: e.target.value})} 
+                      placeholder="Ex: Carlos Albuquerque" 
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Email (Login Firebase) *</label>
+                      <input 
+                        type="email" 
+                        required 
+                        disabled={!!editingUser}
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500 disabled:opacity-60"
+                        value={formUser.email} 
+                        onChange={e => setFormUser({...formUser, email: e.target.value})} 
+                        placeholder="carlos@rbsorocaba.com.br" 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Telefone / WhatsApp</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                        value={formUser.telefone} 
+                        onChange={e => setFormUser({...formUser, telefone: e.target.value})} 
+                        placeholder="(15) 99123-4567" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">CRECI (Se houver)</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                        value={formUser.creci} 
+                        onChange={e => setFormUser({...formUser, creci: e.target.value})} 
+                        placeholder="Ex: 123456-F" 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Cargo Corporativo</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                        value={formUser.cargo} 
+                        onChange={e => setFormUser({...formUser, cargo: e.target.value})} 
+                        placeholder="Ex: Corretor de Vendas" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Perfil de Acesso CRM *</label>
+                      <select 
+                        required
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                        value={formUser.perfil} 
+                        onChange={e => setFormUser({...formUser, perfil: e.target.value})}
+                      >
+                        <option value="Administrador">Administrador (Acesso Total)</option>
+                        <option value="Líder">Líder / Gerente (Gestão + CRM)</option>
+                        <option value="Corretor">Corretor (Apenas CRM próprio)</option>
+                        <option value="Assistente">Assistente (Registro de Imóveis)</option>
+                        <option value="Financeiro">Financeiro (Painel Financeiro)</option>
+                        <option value="Marketing">Marketing (Publicações & SEO)</option>
+                        <option value="Proprietário">Proprietário (Portal Proprietário)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Status do Usuário *</label>
+                      <select 
+                        required
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                        value={formUser.status} 
+                        onChange={e => setFormUser({...formUser, status: e.target.value})}
+                      >
+                        <option value="Ativo">Ativo</option>
+                        <option value="Inativo">Inativo</option>
+                        <option value="Bloqueado">Bloqueado</option>
+                        <option value="Férias">Férias</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Equipe Associada</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                        value={formUser.equipe} 
+                        onChange={e => setFormUser({...formUser, equipe: e.target.value})} 
+                        placeholder="Ex: Vendas Campolim" 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Supervisor Responsável</label>
+                      <input 
+                        type="text" 
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                        value={formUser.supervisor} 
+                        onChange={e => setFormUser({...formUser, supervisor: e.target.value})} 
+                        placeholder="Ex: Diretor Carlos" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Foto do Usuário (URL)</label>
+                    <input 
+                      type="text" 
+                      className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-xl px-4 py-3 text-xs font-bold text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+                      value={formUser.foto} 
+                      onChange={e => setFormUser({...formUser, foto: e.target.value})} 
+                      placeholder="https://images.unsplash.com/photo-..." 
+                    />
+                  </div>
+
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      type="button" 
+                      onClick={() => setIsUserModalOpen(false)}
+                      className="flex-1 py-3.5 bg-[#F6F6F4] hover:bg-[#F1F1ED] text-stone-600 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="flex-1 py-3.5 bg-[#050505] hover:bg-stone-900 text-amber-500 font-extrabold text-[10px] uppercase tracking-widest rounded-xl transition cursor-pointer"
+                    >
+                      {editingUser ? "Salvar Alterações" : "Criar Usuário"}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
