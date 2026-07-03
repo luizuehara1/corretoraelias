@@ -60,7 +60,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  db, auth, logout, loginWithGoogle, submitProperty, getSubmissions, approveProperty, rejectProperty, 
+  db, auth, logout, loginWithGoogle, signInWithEmailAndPassword, sendPasswordResetEmail, checkIfAdmin, submitProperty, getSubmissions, approveProperty, rejectProperty, 
   getPrefixoCodigoImovel, obterPreviaCodigoImovel, seedDefaultSettingsIfEmpty,
   CRM_PERMISSIONS, carregarPerfilSeguro, subscribeToUsers, salvarUsuario, deletarUsuario, 
   subscribeToNotifications, criarNotificacao, marcarNotificacaoComoLida 
@@ -729,6 +729,14 @@ export default function OwnerPortal({
 }) {
   const currentUser = auth.currentUser;
 
+  // States for administrative email/password login
+  const [adminLoginEmail, setAdminLoginEmail] = useState('');
+  const [adminLoginPassword, setAdminLoginPassword] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [adminAuthSuccess, setAdminAuthSuccess] = useState<string | null>(null);
+  const [adminAuthLoading, setAdminAuthLoading] = useState(false);
+  const [adminAuthMode, setAdminAuthMode] = useState<'login' | 'forgot_password'>('login');
+
   // Custom Navigation tabs for high-end Owner Portal (Dashboard + dynamic administrative views)
   const [activeTab, setActiveTab] = useState<string>(
     isAuthorized ? 'dashboard' : 'inventory'
@@ -753,6 +761,106 @@ export default function OwnerPortal({
   const [loadingOpcoes, setLoadingOpcoes] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedReport, setSeedReport] = useState<any>(null);
+
+  const handleAdminEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError(null);
+    setAdminAuthSuccess(null);
+
+    // Validations:
+    if (!adminLoginEmail.trim()) {
+      setAdminAuthError("Informe seu e-mail.");
+      return;
+    }
+    if (!adminLoginPassword) {
+      setAdminAuthError("Informe sua senha.");
+      return;
+    }
+
+    setAdminAuthLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, adminLoginEmail.trim(), adminLoginPassword);
+      const user = userCredential.user;
+      
+      // Verify if the email is registered as an admin/leader/broker in Firestore
+      const hasPermission = await checkIfAdmin(user);
+      if (!hasPermission) {
+        await logout();
+        setAdminAuthError("Acesso negado. Você não tem permissão para acessar o painel.");
+        setAdminAuthLoading(false);
+        return;
+      }
+
+      setAdminAuthSuccess("Acesso concedido com sucesso! Carregando painel...");
+    } catch (error: any) {
+      console.error("Erro no login por e-mail/senha:", error);
+      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials") {
+        setAdminAuthError("E-mail ou senha incorretos.");
+      } else if (error.code === "auth/user-not-found") {
+        setAdminAuthError("Usuário não encontrado.");
+      } else if (error.code === "auth/invalid-email") {
+        setAdminAuthError("Formato de e-mail inválido.");
+      } else {
+        setAdminAuthError(error.message || "Erro desconhecido ao tentar fazer login.");
+      }
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const handleAdminForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminAuthError(null);
+    setAdminAuthSuccess(null);
+
+    if (!adminLoginEmail.trim()) {
+      setAdminAuthError("Informe seu e-mail.");
+      return;
+    }
+
+    setAdminAuthLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, adminLoginEmail.trim());
+      setAdminAuthSuccess("Enviamos um link de redefinição para seu e-mail.");
+    } catch (error: any) {
+      console.error("Erro ao enviar e-mail de redefinição:", error);
+      if (error.code === "auth/user-not-found") {
+        setAdminAuthError("Usuário não encontrado.");
+      } else if (error.code === "auth/invalid-email") {
+        setAdminAuthError("Formato de e-mail inválido.");
+      } else {
+        setAdminAuthError(error.message || "Erro ao tentar redefinir senha.");
+      }
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
+
+  const handleAdminGoogleLogin = async () => {
+    setAdminAuthError(null);
+    setAdminAuthSuccess(null);
+    setAdminAuthLoading(true);
+
+    try {
+      const result = await loginWithGoogle() as any;
+      const user = result?.user || result;
+      if (user) {
+        const hasPermission = await checkIfAdmin(user);
+        if (!hasPermission) {
+          await logout();
+          setAdminAuthError("Acesso negado. Você não tem permissão para acessar o painel.");
+          setAdminAuthLoading(false);
+          return;
+        }
+        setAdminAuthSuccess("Acesso concedido com sucesso!");
+      }
+    } catch (error: any) {
+      console.error("Erro no login via Google:", error);
+      setAdminAuthError(error.message || "Erro ao fazer login com Google.");
+    } finally {
+      setAdminAuthLoading(false);
+    }
+  };
 
   const handleSeedOptions = async () => {
     try {
@@ -7476,25 +7584,175 @@ export default function OwnerPortal({
               )}
             </>
           ) : (
-            /* NON-AUTHORIZED SCREEN: PREMIUM WALL WITH LOGIN BUTTON FIRST */
-            <div className="max-w-md mx-auto my-12 bg-white border border-[#EFEFEA] rounded-3xl p-8 text-center shadow-lg space-y-6">
-              <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-amber-500">
-                <Lock size={32} />
+            /* NON-AUTHORIZED SCREEN: PREMIUM WALL WITH INTEGRATED EMAIL/PASSWORD & GOOGLE LOGIN */
+            <div className="max-w-md mx-auto my-8 bg-white border border-[#EFEFEA] rounded-3xl p-8 shadow-xl space-y-6">
+              <div className="text-center space-y-4">
+                <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-amber-500 border border-amber-100">
+                  <Lock size={28} />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-xl font-black uppercase tracking-tight text-stone-900">Portal Administrativo</h3>
+                  <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">Acesso Restrito & Criptografado</p>
+                </div>
+                <p className="text-xs text-zinc-500 leading-relaxed font-semibold px-2">
+                  Gerencie seu inventário, propostas e histórico operacional com segurança máxima.
+                </p>
               </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-black uppercase tracking-tight text-stone-900">Portal do Proprietário</h3>
-                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Acesso Restrito & Criptografado</p>
+
+              {/* Status Messages */}
+              {adminAuthError && (
+                <div className="p-4 bg-red-50 border border-red-100 text-red-700 text-xs font-bold rounded-2xl flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 shrink-0" />
+                  <p className="leading-relaxed">{adminAuthError}</p>
+                </div>
+              )}
+
+              {adminAuthSuccess && (
+                <div className="p-4 bg-green-50 border border-green-100 text-green-700 text-xs font-bold rounded-2xl flex items-start gap-2.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 shrink-0" />
+                  <p className="leading-relaxed">{adminAuthSuccess}</p>
+                </div>
+              )}
+
+              {adminAuthMode === 'login' ? (
+                /* LOGIN FORM */
+                <form onSubmit={handleAdminEmailLogin} className="space-y-4">
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">E-mail Corporativo</label>
+                    <div className="relative">
+                      <input
+                        type="email"
+                        disabled={adminAuthLoading}
+                        value={adminLoginEmail}
+                        onChange={(e) => setAdminLoginEmail(e.target.value)}
+                        placeholder="nome@rbsorocaba.com.br"
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-xl pl-10 pr-4 py-3.5 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white transition-all duration-300"
+                      />
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                        <User size={16} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 text-left">
+                    <div className="flex justify-between items-center px-1">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Senha de Acesso</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminAuthError(null);
+                          setAdminAuthSuccess(null);
+                          setAdminAuthMode('forgot_password');
+                        }}
+                        className="text-[10px] font-black text-amber-600 hover:text-amber-700 uppercase tracking-wider transition-colors"
+                      >
+                        Esqueci minha senha
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="password"
+                        disabled={adminAuthLoading}
+                        value={adminLoginPassword}
+                        onChange={(e) => setAdminLoginPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-xl pl-10 pr-4 py-3.5 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white transition-all duration-300"
+                      />
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                        <Lock size={16} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={adminAuthLoading}
+                    className="w-full py-4 bg-[#050505] hover:bg-stone-900 text-[#F5B400] rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {adminAuthLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#F5B400]/25 border-t-[#F5B400] rounded-full animate-spin" />
+                        <span>Entrando...</span>
+                      </>
+                    ) : (
+                      <span>Entrar no Painel</span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                /* FORGOT PASSWORD FORM */
+                <form onSubmit={handleAdminForgotPassword} className="space-y-4">
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">E-mail Cadastrado</label>
+                    <div className="relative">
+                      <input
+                        type="email"
+                        disabled={adminAuthLoading}
+                        value={adminLoginEmail}
+                        onChange={(e) => setAdminLoginEmail(e.target.value)}
+                        placeholder="nome@rbsorocaba.com.br"
+                        className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-xl pl-10 pr-4 py-3.5 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white transition-all duration-300"
+                      />
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                        <User size={16} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={adminAuthLoading}
+                    className="w-full py-4 bg-[#050505] hover:bg-stone-900 text-[#F5B400] rounded-xl font-bold text-xs uppercase tracking-widest transition-all shadow flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {adminAuthLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-[#F5B400]/25 border-t-[#F5B400] rounded-full animate-spin" />
+                        <span>Redefinindo...</span>
+                      </>
+                    ) : (
+                      <span>Enviar Link de Recuperação</span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminAuthError(null);
+                      setAdminAuthSuccess(null);
+                      setAdminAuthMode('login');
+                    }}
+                    className="w-full text-xs font-bold text-zinc-500 hover:text-stone-900 uppercase tracking-wider transition-colors pt-1 cursor-pointer"
+                  >
+                    Voltar para o Login
+                  </button>
+                </form>
+              )}
+
+              {/* Divider */}
+              <div className="flex items-center gap-3 py-1">
+                <div className="flex-1 h-px bg-zinc-100" />
+                <span className="text-[9px] font-black text-stone-400 uppercase tracking-wider">Ou</span>
+                <div className="flex-1 h-px bg-zinc-100" />
               </div>
-              <p className="text-xs text-zinc-500 leading-relaxed font-semibold">
-                Para consultar seu inventário, extrair relatórios de visitas ou verificar as finanças de suas unidades RB Sorocaba, faça login com sua conta google corporativa whitelested.
-              </p>
-              
+
+              {/* Google login Option */}
               <button
-                onClick={() => loginWithGoogle()}
-                className="w-full py-4 bg-[#050505] text-amber-500 hover:bg-stone-950 border border-zinc-900 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all shadow"
+                type="button"
+                onClick={handleAdminGoogleLogin}
+                disabled={adminAuthLoading}
+                className="w-full py-4 bg-[#F9F9FB] hover:bg-[#F3F3F5] border border-stone-200 text-stone-700 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all cursor-pointer"
               >
-                <Shield size={16} />
-                Autenticação com Google
+                {adminAuthLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-stone-300 border-t-stone-700 rounded-full animate-spin" />
+                    <span>Entrando com Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <Shield size={16} className="text-stone-500" />
+                    Autenticação com Google
+                  </>
+                )}
               </button>
             </div>
           )}

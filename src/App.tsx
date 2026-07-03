@@ -51,7 +51,8 @@ import {
   Globe,
   FileText,
   PlusCircle,
-  SlidersHorizontal
+  SlidersHorizontal,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -93,12 +94,16 @@ import {
   seedDefaultSettingsIfEmpty,
   getImovelByCodigo,
   getPrefixoCodigoImovel,
-  getRedirectResult
+  getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail
 } from './lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { exportReportToPDF, generateFullCatalogPDF } from './lib/pdfExport';
 import { sendVisitConfirmationNotification } from './services/notificationService';
 import AdminPortal from './components/OwnerPortal';
+import AdminLoginModal from './components/AdminLoginModal';
 
 // --- Config ---
 const BROKER_PHONE = '5515981504714';
@@ -1764,6 +1769,7 @@ function InlineAdminPortal({
   onDeleteVisit,
   onClose,
   isAuthorized,
+  onOpenLogin,
   optTiposImovel = [],
   optTiposNegocio = [],
   optStatusImovel = [],
@@ -1789,6 +1795,7 @@ function InlineAdminPortal({
   onDeleteVisit?: (id: string) => Promise<void>,
   onClose: () => void,
   isAuthorized: boolean,
+  onOpenLogin?: () => void,
   optTiposImovel?: any[],
   optTiposNegocio?: any[],
   optStatusImovel?: any[],
@@ -2171,7 +2178,7 @@ function InlineAdminPortal({
         <div className="flex items-center space-x-4">
           {!isAuthorized && (
             <button 
-              onClick={() => loginWithGoogle()}
+              onClick={() => onOpenLogin?.()}
               className="bg-brand-orange text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-white hover:text-brand-orange transition-all flex items-center gap-2"
             >
               <Shield size={18} />
@@ -3751,6 +3758,13 @@ export default function App() {
   const [userFavorites, setUserFavorites] = useState<string[]>([]);
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
+  const [modalEmail, setModalEmail] = useState('');
+  const [modalPassword, setModalPassword] = useState('');
+  const [modalAuthError, setModalAuthError] = useState<string | null>(null);
+  const [modalAuthSuccess, setModalAuthSuccess] = useState<string | null>(null);
+  const [modalAuthLoading, setModalAuthLoading] = useState(false);
+  const [modalAuthMode, setModalAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
   const [confirmingVisitId, setConfirmingVisitId] = useState<string | null>(null);
 
   // Dynamic dynamic collection states for selects and checklists
@@ -3870,6 +3884,7 @@ export default function App() {
 
   useEffect(() => {
     const handleUrlPathRouting = async () => {
+      if (isAuthLoading) return;
       const path = window.location.pathname;
       if (path.startsWith("/imovel/")) {
         const codigo = decodeURIComponent(path.replace("/imovel/", "")).trim();
@@ -3892,6 +3907,24 @@ export default function App() {
             console.error("Erro ao carregar imóvel pela rota pública:", error);
           }
         }
+      } else if (path === "/admin" || path === "/dashboard") {
+        if (currentUser) {
+          const adminStatus = await checkIfAdmin(currentUser);
+          if (adminStatus) {
+            setIsAdminOpen(true);
+          } else {
+            await logout();
+            setIsAdminOpen(false);
+            alert("Você não tem permissão para acessar o painel.");
+            window.history.replaceState({}, document.title, "/");
+            setCurrentPath("/");
+          }
+        } else {
+          setIsAdminOpen(false);
+          setIsAdminLoginModalOpen(true);
+          window.history.replaceState({}, document.title, "/");
+          setCurrentPath("/");
+        }
       }
     };
 
@@ -3901,7 +3934,7 @@ export default function App() {
     return () => {
       window.removeEventListener("popstate", handleUrlPathRouting);
     };
-  }, []);
+  }, [isAuthLoading, currentUser]);
 
   useEffect(() => {
     let unsubscribeFavorites: (() => void) | undefined;
@@ -4443,6 +4476,120 @@ export default function App() {
     }
   };
 
+  const handlePublicEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalAuthError(null);
+    setModalAuthSuccess(null);
+
+    if (!modalEmail.trim()) {
+      setModalAuthError("Informe seu e-mail.");
+      return;
+    }
+    if (!modalPassword) {
+      setModalAuthError("Informe sua senha.");
+      return;
+    }
+
+    setModalAuthLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, modalEmail.trim(), modalPassword);
+      setModalAuthSuccess("Conectado com sucesso!");
+      setTimeout(() => {
+        setIsLoginModalOpen(false);
+        setModalEmail('');
+        setModalPassword('');
+        setModalAuthError(null);
+        setModalAuthSuccess(null);
+      }, 1000);
+    } catch (error: any) {
+      console.error("Erro no login público:", error);
+      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials") {
+        setModalAuthError("E-mail ou senha incorretos.");
+      } else if (error.code === "auth/user-not-found") {
+        setModalAuthError("Usuário não encontrado.");
+      } else if (error.code === "auth/invalid-email") {
+        setModalAuthError("Formato de e-mail inválido.");
+      } else {
+        setModalAuthError(error.message || "Erro desconhecido ao tentar fazer login.");
+      }
+    } finally {
+      setModalAuthLoading(false);
+    }
+  };
+
+  const handlePublicRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalAuthError(null);
+    setModalAuthSuccess(null);
+
+    if (!modalEmail.trim()) {
+      setModalAuthError("Informe seu e-mail.");
+      return;
+    }
+    if (!modalPassword) {
+      setModalAuthError("Informe sua senha.");
+      return;
+    }
+    if (modalPassword.length < 6) {
+      setModalAuthError("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+
+    setModalAuthLoading(true);
+    try {
+      await createUserWithEmailAndPassword(auth, modalEmail.trim(), modalPassword);
+      setModalAuthSuccess("Conta criada com sucesso! Conectando...");
+      setTimeout(() => {
+        setIsLoginModalOpen(false);
+        setModalEmail('');
+        setModalPassword('');
+        setModalAuthError(null);
+        setModalAuthSuccess(null);
+      }, 1000);
+    } catch (error: any) {
+      console.error("Erro ao registrar usuário:", error);
+      if (error.code === "auth/email-already-in-use") {
+        setModalAuthError("Este e-mail já está em uso.");
+      } else if (error.code === "auth/invalid-email") {
+        setModalAuthError("Formato de e-mail inválido.");
+      } else if (error.code === "auth/weak-password") {
+        setModalAuthError("A senha escolhida é muito fraca.");
+      } else {
+        setModalAuthError(error.message || "Erro desconhecido ao tentar criar conta.");
+      }
+    } finally {
+      setModalAuthLoading(false);
+    }
+  };
+
+  const handlePublicForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setModalAuthError(null);
+    setModalAuthSuccess(null);
+
+    if (!modalEmail.trim()) {
+      setModalAuthError("Informe seu e-mail.");
+      return;
+    }
+
+    setModalAuthLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, modalEmail.trim());
+      setModalAuthSuccess("Enviamos um link de redefinição para seu e-mail.");
+    } catch (error: any) {
+      console.error("Erro no envio de redefinição de senha público:", error);
+      if (error.code === "auth/user-not-found") {
+        setModalAuthError("Usuário não encontrado.");
+      } else if (error.code === "auth/invalid-email") {
+        setModalAuthError("Formato de e-mail inválido.");
+      } else {
+        setModalAuthError(error.message || "Erro ao tentar redefinir senha.");
+      }
+    } finally {
+      setModalAuthLoading(false);
+    }
+  };
+
   const handleToggleFavorite = async (propertyId: string) => {
     if (!currentUser) {
       setIsLoginModalOpen(true);
@@ -4835,7 +4982,7 @@ export default function App() {
                 </a>
                 {!currentUser && (
                   <button 
-                    onClick={() => loginWithGoogle()}
+                    onClick={() => setIsAdminLoginModalOpen(true)}
                     className="text-white/60 hover:text-brand-orange font-bold uppercase tracking-widest text-[9px] hover:scale-105 transition-transform flex items-center gap-2"
                   >
                     <Shield size={14} />
@@ -4990,7 +5137,7 @@ export default function App() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.5 }}
-                    onClick={() => { loginWithGoogle(); setMobileMenuOpen(false); }}
+                    onClick={() => { setIsAdminLoginModalOpen(true); setMobileMenuOpen(false); }}
                     className="w-full bg-white/5 hover:bg-white/10 text-white p-6 rounded-3xl border border-white/10 flex items-center justify-center gap-3 transition-all group"
                   >
                     <Shield className="text-brand-orange group-hover:scale-110 transition-transform" />
@@ -6530,36 +6677,260 @@ export default function App() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[3rem] p-10 md:p-16 max-w-lg w-full shadow-2xl relative overflow-hidden"
+              className="bg-white rounded-[3rem] p-8 md:p-12 max-w-lg w-full shadow-2xl relative overflow-hidden"
             >
               <div className="absolute top-0 right-0 w-32 h-32 bg-brand-orange/10 rounded-full blur-3xl -mr-16 -mt-16" />
               
               <button 
-                onClick={() => setIsLoginModalOpen(false)}
+                onClick={() => {
+                  setIsLoginModalOpen(false);
+                  setModalAuthError(null);
+                  setModalAuthSuccess(null);
+                }}
                 className="absolute top-8 right-8 text-slate-300 hover:text-brand-orange transition-colors"
               >
                 <X size={24} />
               </button>
 
-              <div className="flex flex-col items-center text-center space-y-8">
-                <div className="w-20 h-20 bg-brand-orange/10 rounded-3xl flex items-center justify-center text-brand-orange">
-                  <Star size={40} className="animate-pulse" />
+              <div className="flex flex-col items-center space-y-6">
+                <div className="w-16 h-16 bg-brand-orange/10 rounded-2xl flex items-center justify-center text-brand-orange">
+                  <Star size={32} className="animate-pulse" />
                 </div>
                 
-                <div className="space-y-4">
-                  <h3 className="text-3xl font-black tracking-tighter uppercase leading-tight">Mantenha sua <br /><span className="text-brand-orange">Coleção Privada</span></h3>
-                  <p className="text-slate-500 font-medium">Faça login para salvar seus imóveis favoritos e acessá-los de qualquer dispositivo.</p>
+                <div className="space-y-2 text-center">
+                  <h3 className="text-2xl md:text-3xl font-black tracking-tighter uppercase leading-tight">Mantenha sua <br /><span className="text-brand-orange">Coleção Privada</span></h3>
+                  <p className="text-slate-500 text-sm font-medium">Salve seus imóveis favoritos e acesse-os de qualquer dispositivo.</p>
                 </div>
 
+                {/* Tab Navigation for Login/Register */}
+                {modalAuthMode !== 'forgot_password' && (
+                  <div className="flex bg-slate-100 p-1 rounded-2xl w-full">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalAuthMode('login');
+                        setModalAuthError(null);
+                        setModalAuthSuccess(null);
+                      }}
+                      className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${modalAuthMode === 'login' ? 'bg-white text-stone-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Entrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalAuthMode('register');
+                        setModalAuthError(null);
+                        setModalAuthSuccess(null);
+                      }}
+                      className={`flex-1 py-2.5 text-xs font-black uppercase tracking-wider rounded-xl transition-all ${modalAuthMode === 'register' ? 'bg-white text-stone-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Criar Conta
+                    </button>
+                  </div>
+                )}
+
+                {/* Feedback Messages */}
+                {modalAuthError && (
+                  <div className="w-full p-4 bg-red-50 border border-red-100 text-red-700 text-xs font-bold rounded-2xl flex items-start gap-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 shrink-0" />
+                    <p className="leading-relaxed text-left">{modalAuthError}</p>
+                  </div>
+                )}
+
+                {modalAuthSuccess && (
+                  <div className="w-full p-4 bg-green-50 border border-green-100 text-green-700 text-xs font-bold rounded-2xl flex items-start gap-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5 shrink-0" />
+                    <p className="leading-relaxed text-left">{modalAuthSuccess}</p>
+                  </div>
+                )}
+
+                {/* Login & Register Forms */}
+                {modalAuthMode === 'login' && (
+                  <form onSubmit={handlePublicEmailLogin} className="w-full space-y-4">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">E-mail</label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          disabled={modalAuthLoading}
+                          value={modalEmail}
+                          onChange={(e) => setModalEmail(e.target.value)}
+                          placeholder="seuemail@exemplo.com"
+                          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-2xl pl-10 pr-4 py-3 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-brand-orange focus:bg-white transition-all duration-300"
+                        />
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                          <UserIcon size={16} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <div className="flex justify-between items-center px-1">
+                        <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest">Senha</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalAuthError(null);
+                            setModalAuthSuccess(null);
+                            setModalAuthMode('forgot_password');
+                          }}
+                          className="text-[10px] font-black text-brand-orange hover:text-brand-orange/80 uppercase tracking-wider transition-colors"
+                        >
+                          Esqueci minha senha
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="password"
+                          disabled={modalAuthLoading}
+                          value={modalPassword}
+                          onChange={(e) => setModalPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-2xl pl-10 pr-4 py-3 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-brand-orange focus:bg-white transition-all duration-300"
+                        />
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                          <Lock size={16} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={modalAuthLoading}
+                      className="w-full py-4 bg-brand-orange hover:bg-brand-orange/95 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {modalAuthLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/25 border-t-white rounded-full animate-spin" />
+                          <span>Entrando...</span>
+                        </>
+                      ) : (
+                        <span>Entrar na minha Conta</span>
+                      )}
+                    </button>
+                  </form>
+                )}
+
+                {modalAuthMode === 'register' && (
+                  <form onSubmit={handlePublicRegister} className="w-full space-y-4">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">Seu E-mail</label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          disabled={modalAuthLoading}
+                          value={modalEmail}
+                          onChange={(e) => setModalEmail(e.target.value)}
+                          placeholder="seuemail@exemplo.com"
+                          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-2xl pl-10 pr-4 py-3 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-brand-orange focus:bg-white transition-all duration-300"
+                        />
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                          <UserIcon size={16} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">Escolha uma Senha (mín. 6 caracteres)</label>
+                      <div className="relative">
+                        <input
+                          type="password"
+                          disabled={modalAuthLoading}
+                          value={modalPassword}
+                          onChange={(e) => setModalPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-2xl pl-10 pr-4 py-3 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-brand-orange focus:bg-white transition-all duration-300"
+                        />
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                          <Lock size={16} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={modalAuthLoading}
+                      className="w-full py-4 bg-brand-orange hover:bg-brand-orange/95 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {modalAuthLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/25 border-t-white rounded-full animate-spin" />
+                          <span>Criando conta...</span>
+                        </>
+                      ) : (
+                        <span>Criar minha Conta</span>
+                      )}
+                    </button>
+                  </form>
+                )}
+
+                {modalAuthMode === 'forgot_password' && (
+                  <form onSubmit={handlePublicForgotPassword} className="w-full space-y-4">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">E-mail Cadastrado</label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          disabled={modalAuthLoading}
+                          value={modalEmail}
+                          onChange={(e) => setModalEmail(e.target.value)}
+                          placeholder="seuemail@exemplo.com"
+                          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-2xl pl-10 pr-4 py-3 text-xs font-bold text-stone-900 placeholder:text-stone-400 focus:border-brand-orange focus:bg-white transition-all duration-300"
+                        />
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400">
+                          <UserIcon size={16} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={modalAuthLoading}
+                      className="w-full py-4 bg-brand-orange hover:bg-brand-orange/95 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {modalAuthLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/25 border-t-white rounded-full animate-spin" />
+                          <span>Enviando...</span>
+                        </>
+                      ) : (
+                        <span>Enviar Link de Recuperação</span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalAuthError(null);
+                        setModalAuthSuccess(null);
+                        setModalAuthMode('login');
+                      }}
+                      className="w-full text-xs font-black text-slate-400 hover:text-stone-900 uppercase tracking-wider transition-colors pt-1 cursor-pointer"
+                    >
+                      Voltar para o Login
+                    </button>
+                  </form>
+                )}
+
+                {/* Divider */}
+                <div className="w-full flex items-center gap-3 py-1">
+                  <div className="flex-1 h-px bg-zinc-100" />
+                  <span className="text-[9px] font-black text-stone-400 uppercase tracking-wider">Ou acesse com</span>
+                  <div className="flex-1 h-px bg-zinc-100" />
+                </div>
+
+                {/* Google login Button */}
                 <button 
+                  type="button"
                   onClick={() => {
                     loginWithGoogle();
                     setIsLoginModalOpen(false);
                   }}
-                  className="w-full btn-primary !h-16 md:!h-20 !text-lg md:!text-xl flex items-center justify-center gap-4 group"
+                  className="w-full py-3.5 bg-[#F9F9FB] hover:bg-[#F3F3F5] border border-stone-200 text-stone-700 rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-sm"
                 >
-                  <Shield size={24} className="group-hover:scale-110 transition-transform" />
-                  <span className="font-black uppercase tracking-widest">Acessar via Google</span>
+                  <Shield size={16} className="text-stone-500" />
+                  Acessar via Google
                 </button>
 
                 <p className="text-[10px] text-slate-300 font-bold uppercase tracking-[0.2em]">Exclusivo para clientes RB Sorocaba</p>
@@ -6571,6 +6942,17 @@ export default function App() {
           <ConfirmVisitModal 
             visitId={confirmingVisitId} 
             onClose={() => setConfirmingVisitId(null)} 
+          />
+        )}
+        {isAdminLoginModalOpen && (
+          <AdminLoginModal 
+            isOpen={isAdminLoginModalOpen}
+            onClose={() => setIsAdminLoginModalOpen(false)}
+            onSuccess={() => {
+              setIsAuthorized(true);
+              setIsAdminOpen(true);
+              navigateTo("/admin");
+            }}
           />
         )}
       </AnimatePresence>

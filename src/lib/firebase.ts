@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, updateDoc, deleteDoc, orderBy, onSnapshot, setDoc, writeBatch, runTransaction } from "firebase/firestore";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, User } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, getRedirectResult, signOut, onAuthStateChanged, User } from "firebase/auth";
 
 /**
  * IMPORTANTE: Para que estas variáveis funcionem na Vercel, você deve cadastrar
@@ -20,6 +20,8 @@ export const loginWithGoogle = async () => {
     prompt: 'select_account'
   });
 
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+
   const isMobileOrSafari = typeof navigator !== 'undefined' && (
     /iPhone|iPad|iPod|Safari/i.test(navigator.userAgent) &&
     !/Chrome/i.test(navigator.userAgent)
@@ -27,10 +29,13 @@ export const loginWithGoogle = async () => {
 
   const isProduction = typeof window !== 'undefined' && 
     window.location.hostname !== 'localhost' && 
-    window.location.hostname !== '127.0.0.1';
+    window.location.hostname !== '127.0.0.1' &&
+    !window.location.hostname.includes('ais-dev-') &&
+    !window.location.hostname.includes('ais-pre-') &&
+    !window.location.hostname.includes('run.app');
 
-  if (isMobileOrSafari || isProduction) {
-    console.log("Detectado ambiente móvel/Safari ou Produção: usando signInWithRedirect por padrão.");
+  if (!isIframe && (isMobileOrSafari || isProduction)) {
+    console.log("Detectado ambiente móvel/Safari ou Produção fora de iframe: usando signInWithRedirect por padrão.");
     try {
       await signInWithRedirect(auth, provider);
       return;
@@ -43,6 +48,11 @@ export const loginWithGoogle = async () => {
     return await signInWithPopup(auth, provider);
   } catch (error: any) {
     console.error("Erro no popup Google:", error);
+
+    if (isIframe) {
+      alert("O navegador bloqueou o popup de login dentro do painel de visualização do AI Studio. Por favor, clique no botão 'Abrir em uma nova aba' (Open in a new tab) no topo direito da tela para fazer login com sucesso.");
+      return;
+    }
 
     if (
       error.code === "auth/popup-blocked" ||
@@ -251,6 +261,9 @@ export const subscribeToVisits = (callback: (visits: any[]) => void) => {
   const q = query(collection(db, "visits"), orderBy("date", "desc"), orderBy("time", "desc"));
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+  }, (error) => {
+    console.error("Erro no listener de visitas:", error);
+    throw handleFirestoreError(error, 'list', 'visits');
   });
 };
 
@@ -425,6 +438,7 @@ export const subscribeToProperties = (callback: (properties: any[]) => void, isA
     callback(list);
   }, (error) => {
     console.error("Erro no listener de imóveis:", error);
+    throw handleFirestoreError(error, 'list', 'imoveis');
   });
 };
 
@@ -436,6 +450,9 @@ export const subscribeToBlockedSlots = (callback: (slots: any[]) => void) => {
   const q = query(collection(db, "blocked_slots"), orderBy("date", "desc"), orderBy("time", "desc"));
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+  }, (error) => {
+    console.error("Erro no listener de horários bloqueados:", error);
+    throw handleFirestoreError(error, 'list', 'blocked_slots');
   });
 };
 
@@ -1691,6 +1708,9 @@ export const subscribeToFavorites = (userId: string, callback: (propertyIds: str
   const q = collection(db, "favorites", userId, "items");
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => doc.id));
+  }, (error) => {
+    console.error("Erro no listener de favoritos:", error);
+    throw handleFirestoreError(error, 'list', `favorites/${userId}/items`);
   });
 };
 
@@ -1703,6 +1723,9 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
     const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     list.sort((a: any, b: any) => (a.nome || '').localeCompare(b.nome || ''));
     callback(list);
+  }, (error) => {
+    console.error("Erro no listener de usuários:", error);
+    throw handleFirestoreError(error, 'list', 'usuarios');
   });
 };
 
@@ -1749,7 +1772,21 @@ export const deletarUsuario = async (userId: string) => {
  * Listens to in-app notifications in real-time
  */
 export const subscribeToNotifications = (callback: (notifs: any[]) => void, email?: string, perfil?: string) => {
-  const q = query(collection(db, "notificacoes"), orderBy("createdAt", "desc"));
+  let q;
+  const isPowerUser = perfil === 'Administrador' || perfil === 'Líder';
+  
+  if (isPowerUser) {
+    q = query(collection(db, "notificacoes"));
+  } else if (email) {
+    // Satisfy security rules for regular users by querying their specific notifications directly
+    q = query(
+      collection(db, "notificacoes"),
+      where("destinatarioEmail", "==", email)
+    );
+  } else {
+    q = query(collection(db, "notificacoes"), where("destinatarioPerfil", "==", "none"));
+  }
+
   return onSnapshot(q, (snapshot) => {
     let list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     if (email || perfil) {
@@ -1759,7 +1796,18 @@ export const subscribeToNotifications = (callback: (notifs: any[]) => void, emai
         return matchesEmail || matchesPerfil || n.destinatarioPerfil === '*';
       });
     }
+    
+    // Sort in memory by createdAt descending
+    list.sort((a: any, b: any) => {
+      const timeA = a.createdAt ? (a.createdAt.toDate?.() ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+      const timeB = b.createdAt ? (b.createdAt.toDate?.() ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+      return timeB - timeA;
+    });
+
     callback(list);
+  }, (error) => {
+    console.error("Erro no listener de notificações:", error);
+    throw handleFirestoreError(error, 'list', 'notificacoes');
   });
 };
 
@@ -1795,6 +1843,6 @@ export const marcarNotificacaoComoLida = async (notifId: string) => {
   }
 };
 
-export { onAuthStateChanged };
+export { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail };
 export type { User };
 export default app;

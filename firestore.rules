@@ -62,8 +62,8 @@ service cloud.firestore {
     // ---------------------------------------------------------
     match /usuarios/{userId} {
       allow read: if isSignedIn();
-      allow create: if isAdmin() || isLider();
-      allow update: if isAdmin() || isLider() || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isAdmin() || isLider() || (isSignedIn() && request.auth.uid == userId && request.resource.data.perfil == 'Proprietário');
+      allow update: if isAdmin() || isLider() || (isSignedIn() && request.auth.uid == userId && request.resource.data.perfil == resource.data.perfil && request.resource.data.status == resource.data.status);
       allow delete: if isAdmin();
     }
 
@@ -142,7 +142,7 @@ service cloud.firestore {
     }
 
     match /financeiro/{id} {
-      allow read: if hasPermission('financeiro') || hasPermission('financeiro_leitura');
+      allow read: if hasPermission('financeiro') || hasPermission('financeiro_leitura') || (isSignedIn() && resource.data.ownerId == request.auth.uid);
       allow write: if hasPermission('financeiro');
     }
 

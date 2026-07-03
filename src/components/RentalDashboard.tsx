@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, addDoc, updateDoc, doc, serverTimestamp, getDocs } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, handleFirestoreError } from '../lib/firebase';
 import { Plus, Check, AlertTriangle, X, Search, FileText, Trash2, Edit2, DollarSign, Receipt } from 'lucide-react';
 import { ContractWizard } from './ContractWizard';
 
@@ -51,6 +51,9 @@ export const RentalDashboard: React.FC = () => {
       const projected = active.reduce((sum, r) => sum + (r.valorAluguel || 0), 0);
       setStats({ activeContracts: active.length, paidThisMonth: paid, pendingOverdue: pending, projectedIncome: projected });
       setLoading(false);
+    }, (error) => {
+      console.error("Erro no listener de locações:", error);
+      throw handleFirestoreError(error, 'list', 'locacoes');
     });
     return unsub;
   }, []);
