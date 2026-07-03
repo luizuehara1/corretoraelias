@@ -34,76 +34,39 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
   const verifyUserAccess = async (user: any): Promise<boolean> => {
     if (!user) return false;
     const uid = user.uid;
-    const userEmail = user.email?.toLowerCase() || '';
+    const email = user.email?.toLowerCase() || '';
 
-    // Hardcoded whitelist safety net
-    const whitelist = [
-      'luiz.uehara1@gmail.com', 
-      'eliasborgess@creci.org.com.br', 
-      'eliasborgess@hotmail.com'
-    ];
-    if (userEmail && whitelist.includes(userEmail)) {
-      return true;
-    }
+    const collections = ['admins', 'administradores'];
 
-    const collections = ['admins', 'administradores', 'usuarios', 'users'];
-
-    // 1. Check by UID document in collections
     for (const coll of collections) {
+      // 1. Check by UID
       try {
-        const docRef = doc(db, coll, uid);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          if (coll === 'usuarios' || coll === 'users') {
-            const perfil = data.perfil || data.role;
-            if (perfil && perfil !== 'Proprietário') {
-              return true;
-            }
-          } else {
+        const uidSnap = await getDoc(doc(db, coll, uid));
+        if (uidSnap.exists()) {
+          const data = uidSnap.data();
+          console.log(`Dados encontrados via UID em ${coll}:`, data);
+          if (data.ativo === true && (data.role === 'admin' || data.role === 'master')) {
+            console.log(`Permissão encontrada via UID na coleção ${coll}`);
             return true;
           }
         }
       } catch (err) {
-        console.warn(`Verificação de UID falhou em ${coll} (esperado se não houver regra ou doc):`, err);
+        console.warn(`Erro verificando UID na coleção ${coll}:`, err);
       }
-    }
 
-    // 2. Check by Email document in collections
-    if (userEmail) {
-      for (const coll of collections) {
-        try {
-          const docRef = doc(db, coll, userEmail);
-          const snap = await getDoc(docRef);
-          if (snap.exists()) {
+      // 2. Check by Email
+      try {
+        const emailSnap = await getDoc(doc(db, coll, email));
+        if (emailSnap.exists()) {
+          const data = emailSnap.data();
+          console.log(`Dados encontrados via Email em ${coll}:`, data);
+          if (data.ativo === true && (data.role === 'admin' || data.role === 'master')) {
+            console.log(`Permissão encontrada via Email na coleção ${coll}`);
             return true;
           }
-        } catch (err) {
-          console.warn(`Verificação de email-doc falhou em ${coll}:`, err);
         }
-      }
-    }
-
-    // 3. Query by "email" == userEmail in collections
-    if (userEmail) {
-      for (const coll of collections) {
-        try {
-          const q = query(collection(db, coll), where("email", "==", userEmail));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            if (coll === 'usuarios' || coll === 'users') {
-              const data = snap.docs[0].data();
-              const perfil = data.perfil || data.role;
-              if (perfil && perfil !== 'Proprietário') {
-                return true;
-              }
-            } else {
-              return true;
-            }
-          }
-        } catch (err) {
-          console.warn(`Verificação por query falhou em ${coll}:`, err);
-        }
+      } catch (err) {
+        console.warn(`Erro verificando Email na coleção ${coll}:`, err);
       }
     }
 
@@ -124,11 +87,17 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
     }
 
     setLoading(true);
+    const emailToUse = email.trim().toLowerCase();
+    console.log("Tentando login com:", emailToUse);
     try {
       // 1. Sign in with Email and Password
-      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
-      
+      const credential = await signInWithEmailAndPassword(auth, emailToUse, password.trim());
+      console.log("Login Firebase OK:", credential.user.uid, credential.user.email);
+
       // 2. Verify panel access in Firestore
+      console.log("Verificando admin por email:", credential.user.email);
+      console.log("Verificando admin por uid:", credential.user.uid);
+      
       const hasAccess = await verifyUserAccess(credential.user);
       
       if (hasAccess) {
@@ -141,26 +110,17 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
       } else {
         // Log out user as they are unauthorized
         await signOut(auth);
-        setError('Você não tem permissão para acessar o painel administrativo.');
+        setError('Login realizado, mas sem permissão administrativa.');
         setLoading(false);
       }
     } catch (err: any) {
-      console.error('Erro no login administrativo:', err);
+      console.error('Erro no login administrativo:', err.code, err.message);
       setLoading(false);
       
-      // Friendly messages in Portuguese
-      if (
-        err.code === 'auth/invalid-credential' || 
-        err.code === 'auth/wrong-password' || 
-        err.code === 'auth/user-not-found'
-      ) {
-        setError('E-mail ou senha inválidos. Verifique as credenciais e tente novamente.');
-      } else if (err.code === 'auth/invalid-email') {
-        setError('O formato do e-mail digitado é inválido.');
-      } else if (err.code === 'auth/too-many-requests') {
-        setError('Muitas tentativas malsucedidas. Sua conta foi temporariamente bloqueada. Tente novamente mais tarde.');
+      if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(err.code)) {
+        setError('E-mail ou senha inválidos. Se você costuma entrar com o Google, tente usar o botão "Entrar com Google" abaixo. Caso contrário, verifique suas credenciais.');
       } else {
-        setError(err.message || 'Ocorreu um erro ao tentar realizar o login.');
+        setError(`Erro ao autenticar (${err.code || 'Desconhecido'}). Tente novamente mais tarde.`);
       }
     }
   };
