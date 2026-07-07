@@ -9,7 +9,7 @@ import {
   signOut
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { auth, db, checkIfAdmin } from '../lib/firebase';
 import { X, Mail, Lock, Shield, ArrowRight, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 
 interface AdminLoginModalProps {
@@ -31,43 +31,58 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
     setSuccess(null);
   };
 
-  const verifyUserAccess = async (user: any): Promise<boolean> => {
+  const checkAdminAccess = async (user: any): Promise<boolean> => {
     if (!user) return false;
     const uid = user.uid;
-    const email = user.email?.toLowerCase() || '';
+    const email = user.email?.toLowerCase().trim() || '';
+
+    console.log("Verificando admin por email:", email);
+    console.log("Verificando admin por uid:", uid);
 
     const collections = ['admins', 'administradores'];
+    let errorOccurred = false;
+    let lastError: any = null;
 
     for (const coll of collections) {
-      // 1. Check by UID
+      // 1. Check by Email document
+      if (email) {
+        try {
+          const emailSnap = await getDoc(doc(db, coll, email));
+          if (emailSnap.exists()) {
+            const data = emailSnap.data();
+            console.log(`Dados encontrados via Email em ${coll}:`, data);
+            if (data.ativo === true && (data.role === 'admin' || data.role === 'master' || data.tipo === 'master')) {
+              console.log(`Permissão encontrada via Email na coleção ${coll}`);
+              return true;
+            }
+          }
+        } catch (err: any) {
+          console.error(`Erro ao consultar ${coll} por email (${email}):`, err);
+          lastError = err;
+          errorOccurred = true;
+        }
+      }
+
+      // 2. Check by UID document
       try {
         const uidSnap = await getDoc(doc(db, coll, uid));
         if (uidSnap.exists()) {
           const data = uidSnap.data();
           console.log(`Dados encontrados via UID em ${coll}:`, data);
-          if (data.ativo === true && (data.role === 'admin' || data.role === 'master')) {
+          if (data.ativo === true && (data.role === 'admin' || data.role === 'master' || data.tipo === 'master')) {
             console.log(`Permissão encontrada via UID na coleção ${coll}`);
             return true;
           }
         }
-      } catch (err) {
-        console.warn(`Erro verificando UID na coleção ${coll}:`, err);
+      } catch (err: any) {
+        console.error(`Erro ao consultar ${coll} por uid (${uid}):`, err);
+        lastError = err;
+        errorOccurred = true;
       }
+    }
 
-      // 2. Check by Email
-      try {
-        const emailSnap = await getDoc(doc(db, coll, email));
-        if (emailSnap.exists()) {
-          const data = emailSnap.data();
-          console.log(`Dados encontrados via Email em ${coll}:`, data);
-          if (data.ativo === true && (data.role === 'admin' || data.role === 'master')) {
-            console.log(`Permissão encontrada via Email na coleção ${coll}`);
-            return true;
-          }
-        }
-      } catch (err) {
-        console.warn(`Erro verificando Email na coleção ${coll}:`, err);
-      }
+    if (errorOccurred) {
+      throw new Error(`firestore-error: ${lastError?.message || lastError || 'Acesso negado por regras de segurança do Firestore'}`);
     }
 
     return false;
@@ -95,10 +110,16 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
       console.log("Login Firebase OK:", credential.user.uid, credential.user.email);
 
       // 2. Verify panel access in Firestore
-      console.log("Verificando admin por email:", credential.user.email);
-      console.log("Verificando admin por uid:", credential.user.uid);
-      
-      const hasAccess = await verifyUserAccess(credential.user);
+      let hasAccess = false;
+      try {
+        hasAccess = (await checkAdminAccess(credential.user)) || (await checkIfAdmin(credential.user));
+      } catch (firestoreErr: any) {
+        console.error("Erro ao verificar permissões no Firestore:", firestoreErr);
+        await signOut(auth);
+        setError('Usuário autenticado, mas ocorreu erro ao verificar permissões.');
+        setLoading(false);
+        return;
+      }
       
       if (hasAccess) {
         setSuccess('Acesso autorizado! Carregando painel...');
@@ -110,16 +131,17 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
       } else {
         // Log out user as they are unauthorized
         await signOut(auth);
-        setError('Login realizado, mas sem permissão administrativa.');
+        setError('Usuário autenticado, porém sem permissão administrativa.');
         setLoading(false);
       }
     } catch (err: any) {
-      console.error('Erro no login administrativo:', err.code, err.message);
       setLoading(false);
       
-      if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found'].includes(err.code)) {
-        setError('E-mail ou senha inválidos. Se você costuma entrar com o Google, tente usar o botão "Entrar com Google" abaixo. Caso contrário, verifique suas credenciais.');
+      if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(err.code)) {
+        console.warn('Tentativa de login administrativo malsucedida (credenciais inválidas):', err.code);
+        setError('E-mail ou senha inválidos. Verifique se o usuário existe no Firebase Authentication com provedor Email/Senha e se a senha foi definida corretamente.');
       } else {
+        console.error('Erro no login administrativo:', err.code, err.message);
         setError(`Erro ao autenticar (${err.code || 'Desconhecido'}). Tente novamente mais tarde.`);
       }
     }
@@ -137,7 +159,18 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
     try {
       // Try popup first
       const credential = await signInWithPopup(auth, provider);
-      const hasAccess = await verifyUserAccess(credential.user);
+      console.log("Login Firebase OK:", credential.user.uid, credential.user.email);
+      
+      let hasAccess = false;
+      try {
+        hasAccess = (await checkAdminAccess(credential.user)) || (await checkIfAdmin(credential.user));
+      } catch (firestoreErr: any) {
+        console.error("Erro ao verificar permissões no Firestore após login Google:", firestoreErr);
+        await signOut(auth);
+        setError('Usuário autenticado, mas ocorreu erro ao verificar permissões.');
+        setLoading(false);
+        return;
+      }
       
       if (hasAccess) {
         setSuccess('Acesso via Google autorizado! Carregando painel...');
@@ -148,11 +181,11 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
         }, 1200);
       } else {
         await signOut(auth);
-        setError('Você não tem permissão para acessar o painel.');
+        setError('Usuário autenticado, porém sem permissão administrativa.');
         setLoading(false);
       }
     } catch (err: any) {
-      console.error('Erro ao fazer login com Google Popup, tentando redirect:', err);
+      console.warn('Erro ao fazer login com Google Popup, tentando redirect:', err);
       
       // Fallback to Redirect on failure (e.g. popup blocked)
       if (
@@ -314,23 +347,34 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-4 bg-brand-orange hover:bg-brand-orange/90 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-500/10 flex items-center justify-center gap-2 cursor-pointer mt-2 disabled:opacity-50"
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/25 border-t-white rounded-full animate-spin" />
-                      <span>Autenticando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Entrar</span>
-                      <ArrowRight size={14} />
-                    </>
-                  )}
-                </button>
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="py-4 bg-brand-orange hover:bg-brand-orange/90 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-500/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {loading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/25 border-t-white rounded-full animate-spin" />
+                        <span className="sr-only">Autenticando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Entrar</span>
+                        <ArrowRight size={14} />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleForgotPassword}
+                    className="py-4 bg-slate-800 hover:bg-slate-700/85 border border-white/5 text-slate-300 hover:text-white rounded-2xl font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <span>Redefinir Senha</span>
+                  </button>
+                </div>
 
                 {/* Divider */}
                 <div className="w-full flex items-center gap-3 py-2">

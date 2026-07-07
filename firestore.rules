@@ -21,9 +21,12 @@ service cloud.firestore {
       return isSignedIn() && (
         request.auth.token.email == 'luiz.uehara1@gmail.com' ||
         request.auth.token.email == 'eliasborgess@creci.org.com.br' ||
+        request.auth.token.email == 'eliasborgess@hotmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         exists(/databases/$(database)/documents/administradores/$(request.auth.uid)) ||
-        (hasUserDoc() && getUserData().perfil == 'Administrador')
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/admins/$(request.auth.token.email))) ||
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/administradores/$(request.auth.token.email))) ||
+        (hasUserDoc() && (getUserData().perfil == 'Administrador' || getUserData().perfil == 'Líder'))
       );
     }
 
@@ -49,12 +52,12 @@ service cloud.firestore {
     // ---------------------------------------------------------
     match /admins/{adminId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br'));
+      allow write: if isAdmin() || (isSignedIn() && (adminId == request.auth.uid || adminId == request.auth.token.email) && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br' || request.auth.token.email == 'eliasborgess@hotmail.com'));
     }
 
     match /administradores/{adminId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br'));
+      allow write: if isAdmin() || (isSignedIn() && (adminId == request.auth.uid || adminId == request.auth.token.email) && (request.auth.token.email == 'luiz.uehara1@gmail.com' || request.auth.token.email == 'eliasborgess@creci.org.com.br' || request.auth.token.email == 'eliasborgess@hotmail.com'));
     }
 
     // ---------------------------------------------------------

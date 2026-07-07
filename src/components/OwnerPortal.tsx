@@ -793,7 +793,11 @@ export default function OwnerPortal({
 
       setAdminAuthSuccess("Acesso concedido com sucesso! Carregando painel...");
     } catch (error: any) {
-      console.error("Erro no login por e-mail/senha:", error);
+      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials" || error.code === "auth/user-not-found") {
+        console.warn("Tentativa de login por e-mail/senha malsucedida (credenciais inválidas):", error.code);
+      } else {
+        console.error("Erro no login por e-mail/senha:", error);
+      }
       if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials") {
         setAdminAuthError("E-mail ou senha incorretos.");
       } else if (error.code === "auth/user-not-found") {
@@ -855,7 +859,11 @@ export default function OwnerPortal({
         setAdminAuthSuccess("Acesso concedido com sucesso!");
       }
     } catch (error: any) {
-      console.error("Erro no login via Google:", error);
+      if (error.code === "auth/popup-closed-by-user" || error.code === "auth/cancelled-popup-request") {
+        console.warn("Login via Google cancelado pelo usuário.");
+      } else {
+        console.error("Erro no login via Google:", error);
+      }
       setAdminAuthError(error.message || "Erro ao fazer login com Google.");
     } finally {
       setAdminAuthLoading(false);
@@ -2181,6 +2189,22 @@ export default function OwnerPortal({
   const loadDashboardData = async () => {
     try {
       setDashboardLoading(true);
+
+      // Guard check: skip full administrative queries if the user is not an authorized CRM user
+      if (!isAuthorized) {
+        console.log("Usuário não autorizado para carregar dashboard administrativo: pulando.");
+        setDashboardLoading(false);
+        return {
+          portfolioAtivo: 0,
+          leadsVisitas: 0,
+          receitaMensal: 0,
+          custosOperacionais: 0,
+          ultimosImoveis: [],
+          proximasVisitas: [],
+          alertas: []
+        };
+      }
+
       // 1. Portfolio Ativo
       let imoveisList: any[] = [];
       try {
@@ -2531,7 +2555,7 @@ export default function OwnerPortal({
   useEffect(() => {
     if (!currentUser) return;
     loadDashboardData();
-  }, [currentUser, properties, scheduledVisits, financialList]);
+  }, [currentUser, properties, scheduledVisits, financialList, isAuthorized]);
 
   // Load CRM Users and in-app Notifications in real-time
   useEffect(() => {

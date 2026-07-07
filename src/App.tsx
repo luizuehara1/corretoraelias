@@ -4502,7 +4502,11 @@ export default function App() {
         setModalAuthSuccess(null);
       }, 1000);
     } catch (error: any) {
-      console.error("Erro no login público:", error);
+      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials" || error.code === "auth/user-not-found") {
+        console.warn("Tentativa de login público malsucedida (credenciais inválidas):", error.code);
+      } else {
+        console.error("Erro no login público:", error);
+      }
       if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials") {
         setModalAuthError("E-mail ou senha incorretos.");
       } else if (error.code === "auth/user-not-found") {
