@@ -41,13 +41,6 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------
-    // Global Safety Net (Must be first)
-    // ---------------------------------------------------------
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // ---------------------------------------------------------
     // Backwards Compatible Admins Collections
     // ---------------------------------------------------------
     match /admins/{adminId} {

@@ -7,10 +7,60 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signI
  * cada uma delas nas "Environment Variables" do projeto no painel da Vercel
  * com exatamente os mesmos nomes listados abaixo.
  */
-import firebaseConfig from '../../firebase-applet-config.json';
+import appletConfig from '../../firebase-applet-config.json';
+
+// Chaves de produção fornecidas pelo usuário para o projeto corretoraelias
+const corretoraEliasConfig = {
+  apiKey: "AIzaSyAD7BfSNDgmzczkUPWfK-e1AR6M6PGsNQM",
+  authDomain: "corretoraelias.firebaseapp.com",
+  projectId: "corretoraelias",
+  storageBucket: "corretoraelias.firebasestorage.app",
+  messagingSenderId: "47614426836",
+  appId: "1:47614426836:web:993da2426ded2cefab0541",
+  measurementId: "G-7GDVXR7D66",
+  firestoreDatabaseId: ""
+};
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || corretoraEliasConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || corretoraEliasConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || corretoraEliasConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || corretoraEliasConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || corretoraEliasConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || corretoraEliasConfig.appId,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || corretoraEliasConfig.measurementId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || corretoraEliasConfig.firestoreDatabaseId
+};
+
+// Use sandbox by default in the AI Studio preview environment, unless VITE_FIREBASE_PROJECT_ID is specified
+const isPreviewEnv = typeof window !== 'undefined' && (
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1' ||
+  window.location.hostname.includes('ais-dev-') ||
+  window.location.hostname.includes('ais-pre-') ||
+  window.location.hostname.includes('run.app')
+);
+
+const useSandbox = import.meta.env.VITE_USE_SANDBOX === "true" || (isPreviewEnv && !import.meta.env.VITE_FIREBASE_PROJECT_ID);
+if (useSandbox) {
+  firebaseConfig.apiKey = appletConfig.apiKey;
+  firebaseConfig.authDomain = appletConfig.authDomain;
+  firebaseConfig.projectId = appletConfig.projectId;
+  firebaseConfig.storageBucket = appletConfig.storageBucket;
+  firebaseConfig.messagingSenderId = appletConfig.messagingSenderId;
+  firebaseConfig.appId = appletConfig.appId;
+  firebaseConfig.measurementId = appletConfig.measurementId;
+  firebaseConfig.firestoreDatabaseId = appletConfig.firestoreDatabaseId || "ai-studio-c0d6d2a4-ed2a-427d-bc4a-8acf1b44087e";
+}
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId); 
+
+// Se firestoreDatabaseId for definido e diferente de vazio/"default", inicializamos com ele.
+// Para o "corretoraelias" padrão, usamos o banco "(default)" passando undefined ou vazio.
+export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "default" && firebaseConfig.firestoreDatabaseId !== ""
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
+
 export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
@@ -258,9 +308,15 @@ export const checkIfAdmin = async (user: User | null): Promise<boolean> => {
  * Listens to visits in real-time
  */
 export const subscribeToVisits = (callback: (visits: any[]) => void) => {
-  const q = query(collection(db, "visits"), orderBy("date", "desc"), orderBy("time", "desc"));
+  const q = query(collection(db, "visits"));
   return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    list.sort((a, b) => {
+      const dateCompare = (b.date || "").localeCompare(a.date || "");
+      if (dateCompare !== 0) return dateCompare;
+      return (b.time || "").localeCompare(a.time || "");
+    });
+    callback(list);
   }, (error) => {
     console.error("Erro no listener de visitas:", error);
     throw handleFirestoreError(error, 'list', 'visits');
@@ -447,9 +503,15 @@ export const subscribeToProperties = (callback: (properties: any[]) => void, isA
  * Listens to blocked slots in real-time
  */
 export const subscribeToBlockedSlots = (callback: (slots: any[]) => void) => {
-  const q = query(collection(db, "blocked_slots"), orderBy("date", "desc"), orderBy("time", "desc"));
+  const q = query(collection(db, "blocked_slots"));
   return onSnapshot(q, (snapshot) => {
-    callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    list.sort((a, b) => {
+      const dateCompare = (b.date || "").localeCompare(a.date || "");
+      if (dateCompare !== 0) return dateCompare;
+      return (b.time || "").localeCompare(a.time || "");
+    });
+    callback(list);
   }, (error) => {
     console.error("Erro no listener de horários bloqueados:", error);
     throw handleFirestoreError(error, 'list', 'blocked_slots');
@@ -1630,9 +1692,15 @@ export const scheduleVisit = async (visitData: {
  */
 export const getVisits = async () => {
   try {
-    const q = query(collection(db, "visits"), orderBy("date", "desc"), orderBy("time", "desc"));
+    const q = query(collection(db, "visits"));
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    list.sort((a, b) => {
+      const dateCompare = (b.date || "").localeCompare(a.date || "");
+      if (dateCompare !== 0) return dateCompare;
+      return (b.time || "").localeCompare(a.time || "");
+    });
+    return list;
   } catch (error) {
     throw handleFirestoreError(error, 'list', 'visits');
   }
@@ -1658,9 +1726,15 @@ export const blockSlot = async (slotData: { date: string; time: string; reason?:
  */
 export const getBlockedSlots = async () => {
   try {
-    const q = query(collection(db, "blocked_slots"), orderBy("date", "desc"), orderBy("time", "desc"));
+    const q = query(collection(db, "blocked_slots"));
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    list.sort((a, b) => {
+      const dateCompare = (b.date || "").localeCompare(a.date || "");
+      if (dateCompare !== 0) return dateCompare;
+      return (b.time || "").localeCompare(a.time || "");
+    });
+    return list;
   } catch (error) {
     throw handleFirestoreError(error, 'list', 'blocked_slots');
   }

@@ -23,13 +23,6 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------
-    // Global Safety Net (Must be first)
-    // ---------------------------------------------------------
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // ---------------------------------------------------------
     // Admins and Administradores Collections
     // ---------------------------------------------------------
     match /admins/{adminId} {
