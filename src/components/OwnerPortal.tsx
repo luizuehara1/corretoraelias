@@ -63,7 +63,7 @@ import {
   db, auth, logout, loginWithGoogle, signInWithEmailAndPassword, sendPasswordResetEmail, checkIfAdmin, submitProperty, getSubmissions, approveProperty, rejectProperty, 
   getPrefixoCodigoImovel, obterPreviaCodigoImovel, seedDefaultSettingsIfEmpty,
   CRM_PERMISSIONS, carregarPerfilSeguro, subscribeToUsers, salvarUsuario, deletarUsuario, 
-  subscribeToNotifications, criarNotificacao, marcarNotificacaoComoLida 
+  subscribeToNotifications, criarNotificacao, marcarNotificacaoComoLida, getAuthErrorMessage 
 } from '../lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { exportReportToPDF } from '../lib/pdfExport';
@@ -798,15 +798,7 @@ export default function OwnerPortal({
       } else {
         console.error("Erro no login por e-mail/senha:", error);
       }
-      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/invalid-login-credentials") {
-        setAdminAuthError("E-mail ou senha incorretos.");
-      } else if (error.code === "auth/user-not-found") {
-        setAdminAuthError("Usuário não encontrado.");
-      } else if (error.code === "auth/invalid-email") {
-        setAdminAuthError("Formato de e-mail inválido.");
-      } else {
-        setAdminAuthError(error.message || "Erro desconhecido ao tentar fazer login.");
-      }
+      setAdminAuthError(getAuthErrorMessage(error));
     } finally {
       setAdminAuthLoading(false);
     }

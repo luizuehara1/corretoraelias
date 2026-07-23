@@ -9,7 +9,7 @@ import {
   signOut
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { auth, db, checkIfAdmin } from '../lib/firebase';
+import { auth, db, checkIfAdmin, getAuthErrorMessage } from '../lib/firebase';
 import { X, Mail, Lock, Shield, ArrowRight, AlertTriangle, CheckCircle, Info } from 'lucide-react';
 
 interface AdminLoginModalProps {
@@ -137,12 +137,14 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
     } catch (err: any) {
       setLoading(false);
       
-      if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(err.code)) {
+      if (err.code === 'auth/api-key-not-valid' || err.message?.includes('API key not valid')) {
+        setError(getAuthErrorMessage(err));
+      } else if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(err.code)) {
         console.warn('Tentativa de login administrativo malsucedida (credenciais inválidas):', err.code);
         setError('Usuário ou senha inválidos no Firebase Auth. Redefina a senha desse usuário no Firebase Authentication.');
       } else {
         console.error('Erro no login administrativo:', err.code, err.message);
-        setError(`Erro ao autenticar (${err.code || 'Desconhecido'}). Tente novamente mais tarde.`);
+        setError(getAuthErrorMessage(err));
       }
     }
   };
@@ -165,9 +167,9 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
   const runDirectTest = async () => {
     cleanMessages();
     setLoading(true);
-    console.log("Iniciando teste direto de login com eliasborgess@hotmail.com / 123456789");
+    console.log("Iniciando teste direto de login com eliasborgess@hotmail.com / Elias10");
     try {
-      const credential = await signInWithEmailAndPassword(auth, "eliasborgess@hotmail.com", "123456789");
+      const credential = await signInWithEmailAndPassword(auth, "eliasborgess@hotmail.com", "Elias10");
       console.log("Teste Direto - Login Firebase Auth OK:", credential.user.uid, credential.user.email);
       
       const hasAccess = await checkAdminAccess(credential.user);
@@ -252,7 +254,7 @@ export default function AdminLoginModal({ isOpen, onClose, onSuccess }: AdminLog
           setLoading(false);
         }
       } else {
-        setError(err.message || 'Erro ao autenticar com o Google.');
+        setError(getAuthErrorMessage(err));
         setLoading(false);
       }
     }

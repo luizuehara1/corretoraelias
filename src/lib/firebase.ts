@@ -1,38 +1,15 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore, collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, updateDoc, deleteDoc, orderBy, onSnapshot, setDoc, writeBatch, runTransaction } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, getRedirectResult, signOut, onAuthStateChanged, User } from "firebase/auth";
 
 /**
- * IMPORTANTE: Para que estas variáveis funcionem na Vercel, você deve cadastrar
- * cada uma delas nas "Environment Variables" do projeto no painel da Vercel
- * com exatamente os mesmos nomes listados abaixo.
+ * IMPORTANTE: Para que estas variáveis funcionem na Vercel/Produção, você deve cadastrar
+ * cada uma delas nas "Environment Variables" do projeto na Vercel (Production, Preview, Development)
+ * com exatamente os nomes VITE_FIREBASE_*.
  */
 import appletConfig from '../../firebase-applet-config.json';
 
-// Chaves de produção fornecidas pelo usuário para o projeto corretoraelias
-const corretoraEliasConfig = {
-  apiKey: "AIzaSyAD7BfSNDgmzczkUPWfK-e1AR6M6PGsNQM",
-  authDomain: "corretoraelias.firebaseapp.com",
-  projectId: "corretoraelias",
-  storageBucket: "corretoraelias.firebasestorage.app",
-  messagingSenderId: "47614426836",
-  appId: "1:47614426836:web:993da2426ded2cefab0541",
-  measurementId: "G-7GDVXR7D66",
-  firestoreDatabaseId: ""
-};
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || corretoraEliasConfig.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || corretoraEliasConfig.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || corretoraEliasConfig.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || corretoraEliasConfig.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || corretoraEliasConfig.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || corretoraEliasConfig.appId,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || corretoraEliasConfig.measurementId,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || corretoraEliasConfig.firestoreDatabaseId
-};
-
-// Use sandbox by default in the AI Studio preview environment, unless VITE_FIREBASE_PROJECT_ID is specified
+// Detect preview / AI Studio sandbox environment
 const isPreviewEnv = typeof window !== 'undefined' && (
   window.location.hostname === 'localhost' ||
   window.location.hostname === '127.0.0.1' ||
@@ -41,28 +18,109 @@ const isPreviewEnv = typeof window !== 'undefined' && (
   window.location.hostname.includes('run.app')
 );
 
+// Usar sandbox do AI Studio caso esteja no ambiente de teste/preview e não tenha VITE_FIREBASE_PROJECT_ID definido explicitamente
 const useSandbox = import.meta.env.VITE_USE_SANDBOX === "true" || (isPreviewEnv && !import.meta.env.VITE_FIREBASE_PROJECT_ID);
-if (useSandbox) {
-  firebaseConfig.apiKey = appletConfig.apiKey;
-  firebaseConfig.authDomain = appletConfig.authDomain;
-  firebaseConfig.projectId = appletConfig.projectId;
-  firebaseConfig.storageBucket = appletConfig.storageBucket;
-  firebaseConfig.messagingSenderId = appletConfig.messagingSenderId;
-  firebaseConfig.appId = appletConfig.appId;
-  firebaseConfig.measurementId = appletConfig.measurementId;
-  firebaseConfig.firestoreDatabaseId = appletConfig.firestoreDatabaseId || "ai-studio-c0d6d2a4-ed2a-427d-bc4a-8acf1b44087e";
+
+const firebaseConfig = {
+  apiKey: useSandbox ? appletConfig.apiKey : import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: useSandbox ? appletConfig.authDomain : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: useSandbox ? appletConfig.projectId : import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: useSandbox ? appletConfig.storageBucket : import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: useSandbox ? appletConfig.messagingSenderId : import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: useSandbox ? appletConfig.appId : import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: useSandbox ? appletConfig.measurementId : import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  firestoreDatabaseId: useSandbox 
+    ? (appletConfig.firestoreDatabaseId || "ai-studio-c0d6d2a4-ed2a-427d-bc4a-8acf1b44087e")
+    : (import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "")
+};
+
+// Validar variáveis obrigatórias do Firebase antes da inicialização em produção
+if (!useSandbox) {
+  const requiredFirebaseEnv = {
+    apiKey: firebaseConfig.apiKey,
+    authDomain: firebaseConfig.authDomain,
+    projectId: firebaseConfig.projectId,
+    appId: firebaseConfig.appId
+  };
+
+  const missingFirebaseEnv = Object.entries(requiredFirebaseEnv)
+    .filter(([, value]) => !value || String(value).trim() === "" || value === "undefined" || value === "null")
+    .map(([key]) => key);
+
+  if (missingFirebaseEnv.length > 0) {
+    console.error(
+      "Variáveis obrigatórias do Firebase ausentes no ambiente publicado:",
+      missingFirebaseEnv
+    );
+    throw new Error(
+      `Configuração Firebase incompleta em produção: ${missingFirebaseEnv.join(", ")}. Por favor, cadastre as variáveis VITE_FIREBASE_* nas Environment Variables da Vercel.`
+    );
+  }
 }
 
-const app = initializeApp(firebaseConfig);
+// Log de diagnóstico seguro (não expõe a API Key completa)
+console.log("Firebase config carregado:", {
+  apiKeyPresente: Boolean(firebaseConfig.apiKey),
+  apiKeyInicio: firebaseConfig.apiKey
+    ? `${firebaseConfig.apiKey.slice(0, 6)}...`
+    : "ausente",
+  authDomain: firebaseConfig.authDomain,
+  projectId: firebaseConfig.projectId,
+  appIdPresente: Boolean(firebaseConfig.appId),
+  useSandbox
+});
 
-// Se firestoreDatabaseId for definido e diferente de vazio/"default", inicializamos com ele.
-// Para o "corretoraelias" padrão, usamos o banco "(default)" passando undefined ou vazio.
+// Evitar dupla inicialização do app Firebase
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
+// Inicializar Firestore e Auth usando a mesma instância singleton
 export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "default" && firebaseConfig.firestoreDatabaseId !== ""
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
 export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
+
+/**
+ * Tradutor centralizado de erros do Firebase Auth para mensagens amigáveis em português
+ */
+export function getAuthErrorMessage(error: any): string {
+  const code = error?.code || '';
+  const msg = error?.message || '';
+
+  if (code === 'auth/api-key-not-valid' || msg.includes('API key not valid') || msg.includes('API_KEY_INVALID')) {
+    return 'A configuração de autenticação do site está inválida. Verifique se as variáveis VITE_FIREBASE_* do ambiente de produção estão cadastradas corretamente na Vercel.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    return 'Este domínio ainda não está autorizado no Firebase Authentication (Acesse Firebase Console -> Authentication -> Settings -> Authorized Domains).';
+  }
+  if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials'].includes(code)) {
+    return 'E-mail ou senha inválidos.';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'Esta conta de usuário foi desativada no Firebase Console.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Muitas tentativas malsucedidas. Tente novamente mais tarde.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'Este e-mail já está em uso por outra conta.';
+  }
+  if (code === 'auth/weak-password') {
+    return 'A senha fornecida é muito fraca. Digite pelo menos 6 caracteres com maior complexidade.';
+  }
+  if (code === 'auth/invalid-email') {
+    return 'Formato de e-mail inválido.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'O popup de login foi bloqueado pelo navegador. Permita popups para este site.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'A janela de login do Google foi fechada antes de concluir.';
+  }
+
+  return msg || 'Ocorreu um erro ao autenticar. Tente novamente.';
+}
 
 export const loginWithGoogle = async () => {
   const provider = new GoogleAuthProvider();
@@ -514,7 +572,7 @@ export const subscribeToBlockedSlots = (callback: (slots: any[]) => void) => {
     callback(list);
   }, (error) => {
     console.error("Erro no listener de horários bloqueados:", error);
-    throw handleFirestoreError(error, 'list', 'blocked_slots');
+    callback([]);
   });
 };
 
