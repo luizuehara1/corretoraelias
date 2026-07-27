@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -218,10 +219,28 @@ Gere apenas o texto melhorado pronto para uso, sem comentários introdutórios o
       appType: "spa",
     });
     app.use(vite.middlewares);
+    
+    app.use('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return next();
+      }
+      try {
+        const url = req.originalUrl;
+        let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        if (vite) vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.use('*', (req, res) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return res.status(404).json({ error: "API Endpoint não encontrado" });
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
