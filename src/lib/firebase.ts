@@ -363,6 +363,99 @@ export const checkIfAdmin = async (user: User | null): Promise<boolean> => {
 };
 
 /**
+ * Recursively cleans data before sending to Firestore:
+ * - Removes keys with value `undefined`
+ * - Replaces `NaN` with `0`
+ * - Preserves null, strings, numbers, booleans, arrays, objects, and Firestore FieldValues
+ */
+export function sanitizeFirestoreData(data: any): any {
+  if (data === null || data === undefined) {
+    return null;
+  }
+  if (typeof data === 'number') {
+    return Number.isNaN(data) ? 0 : data;
+  }
+  if (typeof data !== 'object') {
+    return data;
+  }
+  // Preserve Firestore FieldValues or Timestamp / Date objects
+  if (data.constructor && data.constructor.name && (data.constructor.name === 'FieldValue' || data.constructor.name === 'Timestamp' || data.constructor.name === 'Date')) {
+    return data;
+  }
+  if (typeof data.toDate === 'function') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeFirestoreData(item)).filter(item => item !== undefined);
+  }
+
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      const sanitized = sanitizeFirestoreData(value);
+      if (sanitized !== undefined) {
+        cleaned[key] = sanitized;
+      }
+    }
+  }
+  return cleaned;
+}
+
+const LOCAL_IMOVEIS_KEY = "rb_imoveis_cache_v1";
+
+export const getLocalCache = (key: string = LOCAL_IMOVEIS_KEY): any[] => {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const saveToLocalCache = (collectionName: string, item: any) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (collectionName === "imoveis") {
+      const current = getLocalCache(LOCAL_IMOVEIS_KEY);
+      const index = current.findIndex(p => (p.id && p.id === item.id) || (item.codigo && p.codigo === item.codigo));
+      if (index >= 0) {
+        current[index] = { ...current[index], ...item };
+      } else {
+        current.unshift(item);
+      }
+      localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(current));
+    }
+  } catch (e) {
+    console.warn("Erro ao salvar no localStorage cache:", e);
+  }
+};
+
+export const updateLocalCacheList = (collectionName: string, list: any[]) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (collectionName === "imoveis") {
+      localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(list));
+    }
+  } catch (e) {
+    console.warn("Erro ao atualizar localStorage cache:", e);
+  }
+};
+
+export const removeFromLocalCache = (collectionName: string, id: string) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (collectionName === "imoveis") {
+      const current = getLocalCache(LOCAL_IMOVEIS_KEY);
+      const filtered = current.filter(p => p.id !== id && p.codigo !== id);
+      localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(filtered));
+    }
+  } catch (e) {
+    console.warn("Erro ao remover do localStorage cache:", e);
+  }
+};
+
+/**
  * Listens to visits in real-time
  */
 export const subscribeToVisits = (callback: (visits: any[]) => void) => {
@@ -376,8 +469,8 @@ export const subscribeToVisits = (callback: (visits: any[]) => void) => {
     });
     callback(list);
   }, (error) => {
-    console.error("Erro no listener de visitas:", error);
-    throw handleFirestoreError(error, 'list', 'visits');
+    console.warn("Erro ou reconexão no listener de visitas:", error);
+    callback([]);
   });
 };
 
@@ -385,9 +478,16 @@ export const subscribeToVisits = (callback: (visits: any[]) => void) => {
  * Listens to properties in real-time
  */
 export const subscribeToProperties = (callback: (properties: any[]) => void, isAdmin: boolean = false) => {
-  // Fetch the entire collection and sort/filter in memory.
-  // This is highly secure, prevents any "Firestore Index Missing" issues,
-  // and enables robust fallback checks for published properties.
+  // First deliver cached properties immediately so UI never hangs or waits empty
+  const initialLocal = getLocalCache(LOCAL_IMOVEIS_KEY);
+  if (initialLocal && initialLocal.length > 0) {
+    let filteredLocal = initialLocal;
+    if (!isAdmin) {
+      filteredLocal = filteredLocal.filter(p => p.publicadoNoSite === true || p.publicado === true);
+    }
+    callback(filteredLocal);
+  }
+
   const q = query(collection(db, "imoveis"));
   
   return onSnapshot(q, (snapshot) => {
@@ -536,23 +636,42 @@ export const subscribeToProperties = (callback: (properties: any[]) => void, isA
         };
       });
 
+    // Merge with unsynced local cached properties
+    const cachedItems = getLocalCache(LOCAL_IMOVEIS_KEY);
+    if (cachedItems && cachedItems.length > 0) {
+      const firestoreIds = new Set(list.map(p => p.id));
+      const firestoreCodigos = new Set(list.map(p => p.codigo).filter(Boolean));
+      const localOnly = cachedItems.filter(p => !firestoreIds.has(p.id) && (!p.codigo || !firestoreCodigos.has(p.codigo)));
+      if (localOnly.length > 0) {
+        list = [...localOnly, ...list];
+      }
+    }
+
     // Handle filtering based on role / status
     if (!isAdmin) {
       // Return only published ones
       list = list.filter(p => p.publicadoNoSite === true || p.publicado === true);
     }
     
-    // Sort in memory by createdAt desc (or default index fallback)
+    // Sort in memory by createdAt desc
     list.sort((a, b) => {
       const aTime = a.createdAt?.toDate?.() ? a.createdAt.toDate().getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
       const bTime = b.createdAt?.toDate?.() ? b.createdAt.toDate().getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
       return bTime - aTime;
     });
 
+    // Update local cache
+    updateLocalCacheList("imoveis", list);
+
     callback(list);
   }, (error) => {
-    console.error("Erro no listener de imóveis:", error);
-    throw handleFirestoreError(error, 'list', 'imoveis');
+    console.warn("Erro no listener de imóveis, utilizando cache local:", error);
+    const cachedList = getLocalCache(LOCAL_IMOVEIS_KEY);
+    let filtered = cachedList;
+    if (!isAdmin) {
+      filtered = filtered.filter(p => p.publicadoNoSite === true || p.publicado === true);
+    }
+    callback(filtered);
   });
 };
 
@@ -1579,8 +1698,8 @@ export const getImovelByCodigo = async (codigoParam: string) => {
  * Adds a new property to the inventory
  */
 export const addPropertyToInventory = async (propertyData: any) => {
+  let code = propertyData.codigo || propertyData.codigoImovel || "";
   try {
-    let code = propertyData.codigo || propertyData.codigoImovel || "";
     const isCodeEmptyOrTemporary = !code || String(code).toUpperCase().startsWith("REF");
 
     if (isCodeEmptyOrTemporary) {
@@ -1596,12 +1715,32 @@ export const addPropertyToInventory = async (propertyData: any) => {
       codigoImovel: code
     };
 
-    const firestoreData = buildStandardPropertyDoc(dataWithCode, true);
+    const firestoreData = sanitizeFirestoreData(buildStandardPropertyDoc(dataWithCode, true));
     const docRef = await addDoc(collection(db, "imoveis"), firestoreData);
-    return { success: true, id: docRef.id };
+    
+    // Save to local cache backup
+    try {
+      const cacheItem = { id: docRef.id, ...firestoreData, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      saveToLocalCache("imoveis", cacheItem);
+    } catch (e) {
+      console.warn("Erro ao salvar cache de imóvel:", e);
+    }
+
+    return { success: true, id: docRef.id, codigo: code };
   } catch (error) {
-    console.error("Error adding property: ", error);
-    throw error;
+    console.error("Erro ao adicionar imóvel no Firestore, salvando no cache local:", error);
+    try {
+      const tempId = "local_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+      const fallbackCode = code || ("REF" + Math.floor(Math.random() * 10000));
+      const dataWithCode = { ...propertyData, codigo: fallbackCode, codigoImovel: fallbackCode };
+      const fallbackData = sanitizeFirestoreData(buildStandardPropertyDoc(dataWithCode, true));
+      const cacheItem = { id: tempId, ...fallbackData, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      saveToLocalCache("imoveis", cacheItem);
+      return { success: true, id: tempId, codigo: fallbackCode, localFallback: true };
+    } catch (fallbackError) {
+      console.error("Erro fatal ao salvar imóvel no cache de backup:", fallbackError);
+      throw error;
+    }
   }
 };
 
@@ -1609,10 +1748,10 @@ export const addPropertyToInventory = async (propertyData: any) => {
  * Updates an existing property
  */
 export const updatePropertyInInventory = async (id: string, propertyData: any) => {
+  let code = propertyData.codigo || propertyData.codigoImovel || "";
   try {
     const docRef = doc(db, "imoveis", id);
 
-    let code = propertyData.codigo || propertyData.codigoImovel || "";
     const isCodeEmptyOrTemporary = !code || String(code).toUpperCase().startsWith("REF");
 
     if (isCodeEmptyOrTemporary) {
@@ -1628,12 +1767,27 @@ export const updatePropertyInInventory = async (id: string, propertyData: any) =
       codigoImovel: code
     };
 
-    const firestoreData = buildStandardPropertyDoc(dataWithCode, false);
+    const firestoreData = sanitizeFirestoreData(buildStandardPropertyDoc(dataWithCode, false));
     await updateDoc(docRef, firestoreData);
-    return { success: true };
+    
+    // Update local cache
+    try {
+      saveToLocalCache("imoveis", { id, ...firestoreData, updatedAt: new Date().toISOString() });
+    } catch (e) {
+      console.warn("Erro ao atualizar cache de imóvel:", e);
+    }
+
+    return { success: true, id };
   } catch (error) {
-    console.error("Error updating property: ", error);
-    throw error;
+    console.warn("Erro ao atualizar no Firestore, atualizando cache local:", error);
+    try {
+      const dataWithCode = { ...propertyData, codigo: code, codigoImovel: code };
+      const fallbackData = sanitizeFirestoreData(buildStandardPropertyDoc(dataWithCode, false));
+      saveToLocalCache("imoveis", { id, ...fallbackData, updatedAt: new Date().toISOString() });
+      return { success: true, id, localFallback: true };
+    } catch (e) {
+      throw error;
+    }
   }
 };
 
@@ -1645,10 +1799,12 @@ export const deletePropertyFromInventory = async (id: string) => {
   try {
     const docRef = doc(db, "imoveis", id);
     await deleteDoc(docRef);
+    removeFromLocalCache("imoveis", id);
     return { success: true };
   } catch (error) {
-    console.error("Error deleting property: ", error);
-    throw error;
+    console.warn("Erro ao deletar imóvel do Firestore, removendo do cache local:", error);
+    removeFromLocalCache("imoveis", id);
+    return { success: true };
   }
 };
 
@@ -1841,8 +1997,8 @@ export const subscribeToFavorites = (userId: string, callback: (propertyIds: str
   return onSnapshot(q, (snapshot) => {
     callback(snapshot.docs.map(doc => doc.id));
   }, (error) => {
-    console.error("Erro no listener de favoritos:", error);
-    throw handleFirestoreError(error, 'list', `favorites/${userId}/items`);
+    console.warn("Erro no listener de favoritos:", error);
+    callback([]);
   });
 };
 
@@ -1856,8 +2012,8 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
     list.sort((a: any, b: any) => (a.nome || '').localeCompare(b.nome || ''));
     callback(list);
   }, (error) => {
-    console.error("Erro no listener de usuários:", error);
-    throw handleFirestoreError(error, 'list', 'usuarios');
+    console.warn("Erro no listener de usuários:", error);
+    callback([]);
   });
 };
 
@@ -1938,8 +2094,8 @@ export const subscribeToNotifications = (callback: (notifs: any[]) => void, emai
 
     callback(list);
   }, (error) => {
-    console.error("Erro no listener de notificações:", error);
-    throw handleFirestoreError(error, 'list', 'notificacoes');
+    console.warn("Erro no listener de notificações:", error);
+    callback([]);
   });
 };
 

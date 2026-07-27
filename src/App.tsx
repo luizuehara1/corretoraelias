@@ -2072,9 +2072,9 @@ function InlineAdminPortal({
       
       if (isAuthorized) {
         if (editingId !== null) {
-          onUpdateProperty({ ...propertyData, id: editingId } as Property);
+          await onUpdateProperty({ ...propertyData, id: editingId } as Property);
         } else {
-          onAddProperty(propertyData);
+          await onAddProperty(propertyData);
         }
         
         setShowSuccess(true);
