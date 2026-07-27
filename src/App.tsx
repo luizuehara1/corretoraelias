@@ -3564,7 +3564,20 @@ function ContactForm() {
   );
 }
 
-function HistoryModal({ onClose }: { onClose: () => void }) {
+function HistoryModal({ onClose, siteSections, siteCompany }: { onClose: () => void; siteSections?: any; siteCompany?: any }) {
+  const storyText = siteSections?.aboutText || siteCompany?.aboutText || siteCompany?.narrativa || `A RB SOROCABA NEGÓCIOS IMOBILIÁRIOS nasceu de um sonho: transformar a jornada de busca pelo lar ideal em uma experiência de pura satisfação e segurança.
+
+Fundada há mais de uma década pelo visionário Elias Borges, a imobiliária iniciou suas atividades com o foco voltado para o atendimento personalizado e humano. Desde o primeiro dia, entendemos que não estávamos apenas vendendo paredes e telhados, mas ajudando a construir capítulos fundamentais na vida de nossos clientes.
+
+Ao longo dos anos, consolidamos nossa posição no mercado de Sorocaba e região como sinônimo de ética, transparência e curadoria de excelência. Nossa equipe cresceu, integrando profissionais como Cleidiane Borges, que compartilham os mesmos valores fundamentais de dedicação absoluta ao cliente.
+
+Especializamo-nos no segmento de médio e alto padrão, entendendo as nuances e exigências desse mercado. Hoje, a RB SOROCABA é referência em assessoria imobiliária estratégica, oferecendo não apenas um catálogo premium, mas um suporte completo que inclui análise documental rigorosa, consultoria de investimentos e um concierge dedicado.`;
+
+  const paragraphs = storyText
+    .split(/\n+/)
+    .map((p: string) => p.trim())
+    .filter((p: string) => p.length > 0);
+
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -3588,27 +3601,26 @@ function HistoryModal({ onClose }: { onClose: () => void }) {
               <Star size={24} />
             </div>
             <div>
-              <h2 className="text-3xl font-black tracking-tighter uppercase">Nossa <span className="text-brand-orange">História</span></h2>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">O Legado RB Sorocaba</p>
+              <h2 className="text-3xl font-black tracking-tighter uppercase">
+                {siteSections?.aboutTitle ? siteSections.aboutTitle : <>Nossa <span className="text-brand-orange">História</span></>}
+              </h2>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">
+                {siteCompany?.nomeFantasia || "O Legado RB Sorocaba"}
+              </p>
             </div>
           </div>
 
           <div className="space-y-6 text-slate-600 leading-relaxed text-lg">
-            <p className="font-bold text-slate-900 border-l-4 border-brand-orange pl-4 italic">
-              "A RB SOROCABA NEGÓCIOS IMOBILIÁRIOS nasceu de um sonho: transformar a jornada de busca pelo lar ideal em uma experiência de pura satisfação e segurança."
-            </p>
-            <p>
-              Fundada há mais de uma década pelo visionário Elias Borges, a imobiliária iniciou suas atividades com o foco voltado para o atendimento personalizado e humano. Desde o primeiro dia, entendemos que não estávamos apenas vendendo paredes e telhados, mas ajudando a construir capítulos fundamentais na vida de nossos clientes.
-            </p>
-            <p>
-              Ao longo dos anos, consolidamos nossa posição no mercado de Sorocaba e região como sinônimo de ética, transparência e curadoria de excelência. Nossa equipe cresceu, integrando profissionais como Cleidiane Borges, que compartilham os mesmos valores fundamentais de dedicação absoluta ao cliente.
-            </p>
-            <p>
-              Especializamo-nos no segmento de médio e alto padrão, entendendo as nuances e exigências desse mercado. Hoje, a RB SOROCABA é referência em assessoria imobiliária estratégica, oferecendo não apenas um catálogo premium, mas um suporte completo que inclui análise documental rigorosa, consultoria de investimentos e um concierge dedicado.
-            </p>
-            <p className="font-medium text-brand-dark">
-              Nossa história continua sendo escrita a cada chave entregue e a cada novo sorriso. Convidamos você a fazer parte desse legado e descobrir por que somos a escolha certa para quem busca o extraordinário.
-            </p>
+            {paragraphs.map((para: string, idx: number) => {
+              if (idx === 0) {
+                return (
+                  <p key={idx} className="font-bold text-slate-900 border-l-4 border-brand-orange pl-4 italic">
+                    "{para}"
+                  </p>
+                );
+              }
+              return <p key={idx}>{para}</p>;
+            })}
           </div>
 
           <div className="pt-8 border-t border-slate-100 flex flex-col md:flex-row gap-6 items-center justify-between">
@@ -3786,6 +3798,24 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
 
   const navigateTo = (path: string) => {
+    if (path.includes('#')) {
+      const parts = path.split('#');
+      const targetPage = parts[0] || currentPath;
+      const hash = parts[1];
+      window.history.pushState({}, "", path);
+      if (targetPage !== currentPath && targetPage !== "") {
+        setCurrentPath(targetPage);
+      }
+      setTimeout(() => {
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth" });
+        } else {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      }, 150);
+      return;
+    }
     window.history.pushState({}, "", path);
     setCurrentPath(path);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -4630,7 +4660,7 @@ export default function App() {
       {/* --- History Modal --- */}
       <AnimatePresence>
         {isHistoryOpen && (
-          <HistoryModal onClose={() => setIsHistoryOpen(false)} />
+          <HistoryModal onClose={() => setIsHistoryOpen(false)} siteSections={siteSections} siteCompany={siteCompany} />
         )}
       </AnimatePresence>
 
@@ -5718,7 +5748,14 @@ export default function App() {
                     </div>
                   </div>
                   <button 
-                    onClick={() => setIsHistoryOpen(true)}
+                    onClick={() => {
+                      const el = document.getElementById('nossa-historia');
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth' });
+                      } else {
+                        setIsHistoryOpen(true);
+                      }
+                    }}
                     className="btn-secondary group !px-8 md:!px-10 !py-4 md:!py-5 uppercase text-[10px] md:text-xs tracking-widest font-black flex items-center gap-2 md:gap-4 mx-auto md:mx-0 shadow-lg"
                   >
                     Nossa História 
@@ -5730,7 +5767,7 @@ export default function App() {
           </section>
 
           {/* Inline Detailed Legacy Story */}
-          <section className="py-24 bg-slate-50 relative overflow-hidden border-t border-slate-100">
+          <section id="nossa-historia" className="py-24 bg-slate-50 relative overflow-hidden border-t border-slate-100">
             <div className="container mx-auto px-6">
               <div className="grid md:grid-cols-2 gap-16 items-center max-w-6xl mx-auto">
                 <div className="space-y-8">
@@ -5739,28 +5776,34 @@ export default function App() {
                     <span className="text-brand-orange font-black uppercase tracking-[0.3em] text-[10px]">Nosso Legado</span>
                   </div>
                   <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-none">
-                    Nossa <span className="text-brand-orange">História</span>
+                    {siteSections?.aboutTitle ? siteSections.aboutTitle : <>Nossa <span className="text-brand-orange">História</span></>}
                   </h2>
                   <div className="space-y-6 text-slate-600 leading-relaxed text-base md:text-lg">
-                    <p className="font-bold text-slate-900 border-l-4 border-brand-orange pl-4 italic">
-                      "A RB SOROCABA NEGÓCIOS IMOBILIÁRIOS nasceu de um sonho: transformar a jornada de busca pelo lar ideal em uma experiência de pura satisfação e segurança."
-                    </p>
-                    <p>
-                      Fundada há mais de uma década pelo visionário Elias Borges, a imobiliária iniciou suas atividades com o foco voltado para o atendimento personalizado e humano. Desde o primeiro dia, entendemos que não estávamos apenas vendendo paredes e telhados, mas ajudando a construir capítulos fundamentais na vida de nossos clientes.
-                    </p>
-                    <p>
-                      Ao longo dos anos, consolidamos nossa posição no mercado de Sorocaba e região como sinônimo de ética, transparência e curadoria de excelência. Nossa equipe cresceu, integrando profissionais como Cleidiane Borges, que compartilham os mesmos valores fundamentais de dedicação absoluta ao cliente.
-                    </p>
-                    <p>
-                      Especializamo-nex no segmento de médio e alto padrão, entendendo as nuances e exigências desse mercado. Hoje, a RB SOROCABA é referência em assessoria imobiliária estratégica, oferecendo não apenas um catálogo premium, mas um suporte completo que inclui análise documental rigorosa, consultoria de investimentos e um concierge dedicado.
-                    </p>
+                    {((siteSections?.aboutText || siteCompany?.aboutText || siteCompany?.narrativa || `A RB SOROCABA NEGÓCIOS IMOBILIÁRIOS nasceu de um sonho: transformar a jornada de busca pelo lar ideal em uma experiência de pura satisfação e segurança.
+
+Fundada há mais de uma década pelo visionário Elias Borges, a imobiliária iniciou suas atividades com o foco voltado para o atendimento personalizado e humano. Desde o primeiro dia, entendemos que não estávamos apenas vendendo paredes e telhados, mas ajudando a construir capítulos fundamentais na vida de nossos clientes.
+
+Ao longo dos anos, consolidamos nossa posição no mercado de Sorocaba e região como sinônimo de ética, transparência e curadoria de excelência. Nossa equipe cresceu, integrando profissionais como Cleidiane Borges, que compartilham os mesmos valores fundamentais de dedicação absoluta ao cliente.
+
+Especializamo-nos no segmento de médio e alto padrão, entendendo as nuances e exigências desse mercado. Hoje, a RB SOROCABA é referência em assessoria imobiliária estratégica, oferecendo não apenas um catálogo premium, mas um suporte completo que inclui análise documental rigorosa, consultoria de investimentos e um concierge dedicado.`).split(/\n+/)).map((para: string, idx: number) => {
+                      const trimmed = para.trim();
+                      if (!trimmed) return null;
+                      if (idx === 0) {
+                        return (
+                          <p key={idx} className="font-bold text-slate-900 border-l-4 border-brand-orange pl-4 italic">
+                            "{trimmed}"
+                          </p>
+                        );
+                      }
+                      return <p key={idx}>{trimmed}</p>;
+                    })}
                   </div>
                 </div>
                 <div className="relative group">
                   <div className="absolute inset-0 bg-brand-orange/15 rounded-[3rem] blur-3xl opacity-30 group-hover:opacity-50 transition-opacity" />
                   <div className="relative rounded-[3rem] overflow-hidden aspect-square shadow-2xl border-4 border-white bg-slate-100">
                     <img 
-                      src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?q=80&w=1000&auto=format&fit=crop" 
+                      src={siteSections?.aboutImageUrl || "https://images.unsplash.com/photo-1560518883-ce09059eeffa?q=80&w=1000&auto=format&fit=crop"} 
                       alt="Reunião Corporativa" 
                       className="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-105"
                     />

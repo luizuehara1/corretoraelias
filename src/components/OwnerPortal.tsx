@@ -1992,8 +1992,14 @@ export default function OwnerPortal({
         await setDoc(doc(db, "siteSettings", "home"), { ...siteHomeSettings, updatedAt: new Date() }, { merge: true });
       } else if (settingsSubTab === 'sections') {
         await setDoc(doc(db, "siteSettings", "sections"), { ...siteSectionsSettings, updatedAt: new Date() }, { merge: true });
+        if (siteSectionsSettings.aboutText) {
+          await setDoc(doc(db, "siteSettings", "company"), { aboutText: siteSectionsSettings.aboutText, narrativa: siteSectionsSettings.aboutText, updatedAt: new Date() }, { merge: true });
+        }
       } else if (settingsSubTab === 'company') {
         await setDoc(doc(db, "siteSettings", "company"), { ...siteCompanySettings, updatedAt: new Date() }, { merge: true });
+        if (siteCompanySettings.aboutText) {
+          await setDoc(doc(db, "siteSettings", "sections"), { aboutText: siteCompanySettings.aboutText, updatedAt: new Date() }, { merge: true });
+        }
       } else if (settingsSubTab === 'appearance') {
         await setDoc(doc(db, "siteSettings", "appearance"), { ...siteAppearanceSettings, updatedAt: new Date() }, { merge: true });
       } else {
@@ -7003,9 +7009,14 @@ export default function OwnerPortal({
                                   value={siteSectionsSettings.aboutTitle || ''} onChange={e => setSiteSectionsSettings({...siteSectionsSettings, aboutTitle: e.target.value})} placeholder="Sobre a RB Sorocaba" />
                               </div>
                               <div className="space-y-1.5">
-                                <label className="text-[9px] font-black text-[#A1A1AA] uppercase tracking-widest">Narrativa da Empresa (Text Area)</label>
-                                <textarea rows={4} className="w-full bg-white border border-[#EFEFEA] focus:border-amber-500 outline-none rounded-xl px-4 py-3 text-xs font-bold text-stone-900 resize-none"
-                                  value={siteSectionsSettings.aboutText || ''} onChange={e => setSiteSectionsSettings({...siteSectionsSettings, aboutText: e.target.value})} placeholder="História e valores da marca..." />
+                                <label className="text-[9px] font-black text-amber-600 uppercase tracking-widest block">Narrativa da Empresa / Nossa História (Exibido no Site)</label>
+                                <p className="text-[10px] text-stone-500 font-medium">Escreva aqui a história da empresa. Este texto será exibido dinamicamente na página 'Sobre Nós' e no modal 'Nossa História' do site.</p>
+                                <textarea rows={6} className="w-full bg-white border border-[#EFEFEA] focus:border-amber-500 outline-none rounded-xl px-4 py-3 text-xs font-bold text-stone-900 resize-y"
+                                  value={siteSectionsSettings.aboutText || ''} onChange={e => {
+                                    const val = e.target.value;
+                                    setSiteSectionsSettings({...siteSectionsSettings, aboutText: val});
+                                    setSiteCompanySettings({...siteCompanySettings, aboutText: val, narrativa: val});
+                                  }} placeholder="Escreva aqui a História, legado e valores da empresa..." />
                               </div>
                               <div className="space-y-1.5">
                                 <label className="text-[9px] font-black text-[#A1A1AA] uppercase tracking-widest">Imagem Lateral Institucional (URL)</label>
@@ -7232,6 +7243,19 @@ export default function OwnerPortal({
                               <label className="text-[10px] font-black text-[#A1A1AA] uppercase tracking-widest pl-1">Frase Institucional Corporativa (Slogan)</label>
                               <input type="text" className="w-full bg-[#F6F6F4] border border-[#EFEFEA] outline-none rounded-xl px-4 py-3 text-xs font-bold text-stone-900"
                                 value={siteCompanySettings.fraseInstitucional || ''} onChange={e => setSiteCompanySettings({...siteCompanySettings, fraseInstitucional: e.target.value})} />
+                            </div>
+
+                            <div className="space-y-1.5 md:col-span-3 border-t border-neutral-100 pt-3">
+                              <label className="text-[10px] font-black text-amber-600 uppercase tracking-widest pl-1 block">Narrativa da Empresa / Nossa História (Exibido no Site)</label>
+                              <p className="text-[10px] text-stone-500 font-bold pl-1">História oficial da imobiliária que é exibida na seção 'Nossa História' e na página 'Sobre Nós'.</p>
+                              <textarea rows={6} className="w-full bg-[#F6F6F4] border border-[#EFEFEA] focus:border-amber-500 outline-none rounded-xl px-4 py-3 text-xs font-bold text-stone-900 resize-y"
+                                value={siteCompanySettings.aboutText || siteSectionsSettings.aboutText || ''} 
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setSiteCompanySettings({...siteCompanySettings, aboutText: val, narrativa: val});
+                                  setSiteSectionsSettings({...siteSectionsSettings, aboutText: val});
+                                }} 
+                                placeholder="Escreva aqui a História, legado e valores da imobiliária..." />
                             </div>
                           </div>
                         </div>
