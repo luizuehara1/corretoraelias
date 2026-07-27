@@ -21,57 +21,76 @@ const isPreviewEnv = typeof window !== 'undefined' && (
 // Usar sandbox do AI Studio caso esteja no ambiente de teste/preview e não tenha VITE_FIREBASE_PROJECT_ID definido explicitamente
 const useSandbox = import.meta.env.VITE_USE_SANDBOX === "true" || (isPreviewEnv && !import.meta.env.VITE_FIREBASE_PROJECT_ID);
 
-const firebaseConfig = {
-  apiKey: useSandbox ? appletConfig.apiKey : import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: useSandbox ? appletConfig.authDomain : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: useSandbox ? appletConfig.projectId : import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: useSandbox ? appletConfig.storageBucket : import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: useSandbox ? appletConfig.messagingSenderId : import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: useSandbox ? appletConfig.appId : import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: useSandbox ? appletConfig.measurementId : import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
-  firestoreDatabaseId: useSandbox 
-    ? (appletConfig.firestoreDatabaseId || "ai-studio-c0d6d2a4-ed2a-427d-bc4a-8acf1b44087e")
-    : (import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "")
+// Configuração padrão de produção da Corretora Elias como fallback seguro
+const corretoraEliasConfig = {
+  apiKey: "AIzaSyAD7BfSNDgmzczkUPWfK-e1AR6M6PGsNQM",
+  authDomain: "corretoraelias.firebaseapp.com",
+  projectId: "corretoraelias",
+  storageBucket: "corretoraelias.firebasestorage.app",
+  messagingSenderId: "47614426836",
+  appId: "1:47614426836:web:993da2426ded2cefab0541",
+  measurementId: "G-7GDVXR7D66",
+  firestoreDatabaseId: ""
 };
 
-// Validar variáveis obrigatórias do Firebase antes da inicialização em produção
-if (!useSandbox) {
-  const requiredFirebaseEnv = {
-    apiKey: firebaseConfig.apiKey,
-    authDomain: firebaseConfig.authDomain,
-    projectId: firebaseConfig.projectId,
-    appId: firebaseConfig.appId
-  };
-
-  const missingFirebaseEnv = Object.entries(requiredFirebaseEnv)
-    .filter(([, value]) => !value || String(value).trim() === "" || value === "undefined" || value === "null")
-    .map(([key]) => key);
-
-  if (missingFirebaseEnv.length > 0) {
-    console.error(
-      "Variáveis obrigatórias do Firebase ausentes no ambiente publicado:",
-      missingFirebaseEnv
-    );
-    throw new Error(
-      `Configuração Firebase incompleta em produção: ${missingFirebaseEnv.join(", ")}. Por favor, cadastre as variáveis VITE_FIREBASE_* nas Environment Variables da Vercel.`
-    );
+const getEffectiveFirebaseConfig = () => {
+  // Se houver VITE_FIREBASE_API_KEY no ambiente Vercel/Produção, priorizá-la
+  const envApiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  if (envApiKey && envApiKey !== "undefined" && envApiKey.trim() !== "") {
+    return {
+      apiKey: envApiKey,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || corretoraEliasConfig.authDomain,
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || corretoraEliasConfig.projectId,
+      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || corretoraEliasConfig.storageBucket,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || corretoraEliasConfig.messagingSenderId,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID || corretoraEliasConfig.appId,
+      measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || corretoraEliasConfig.measurementId,
+      firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || ""
+    };
   }
-}
 
-// Log de diagnóstico seguro (não expõe a API Key completa)
+  // Se estiver no ambiente de preview/sandbox do AI Studio
+  if (useSandbox && appletConfig?.apiKey) {
+    return {
+      apiKey: appletConfig.apiKey,
+      authDomain: appletConfig.authDomain,
+      projectId: appletConfig.projectId,
+      storageBucket: appletConfig.storageBucket,
+      messagingSenderId: appletConfig.messagingSenderId,
+      appId: appletConfig.appId,
+      measurementId: appletConfig.measurementId,
+      firestoreDatabaseId: appletConfig.firestoreDatabaseId || "ai-studio-c0d6d2a4-ed2a-427d-bc4a-8acf1b44087e"
+    };
+  }
+
+  // Fallback seguro em produção para que a página nunca fique em branco
+  return {
+    ...corretoraEliasConfig,
+    apiKey: corretoraEliasConfig.apiKey || appletConfig.apiKey,
+    authDomain: corretoraEliasConfig.authDomain || appletConfig.authDomain,
+    projectId: corretoraEliasConfig.projectId || appletConfig.projectId,
+    appId: corretoraEliasConfig.appId || appletConfig.appId,
+  };
+};
+
+const firebaseConfig = getEffectiveFirebaseConfig();
+
+// Log de diagnóstico seguro
 console.log("Firebase config carregado:", {
   apiKeyPresente: Boolean(firebaseConfig.apiKey),
-  apiKeyInicio: firebaseConfig.apiKey
-    ? `${firebaseConfig.apiKey.slice(0, 6)}...`
-    : "ausente",
   authDomain: firebaseConfig.authDomain,
   projectId: firebaseConfig.projectId,
-  appIdPresente: Boolean(firebaseConfig.appId),
   useSandbox
 });
 
 // Evitar dupla inicialização do app Firebase
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+let app: any;
+try {
+  app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+} catch (e) {
+  console.error("Erro ao inicializar Firebase app:", e);
+  app = getApps().length ? getApp() : initializeApp(corretoraEliasConfig);
+}
 
 // Inicializar Firestore e Auth usando a mesma instância singleton
 export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "default" && firebaseConfig.firestoreDatabaseId !== ""
@@ -80,6 +99,7 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
 
 export const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
+
 
 /**
  * Tradutor centralizado de erros do Firebase Auth para mensagens amigáveis em português
