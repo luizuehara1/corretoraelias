@@ -2,9 +2,221 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ---------------------------------------------------------
+    // Funções Auxiliares
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email in ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br', 'eliasborgess@hotmail.com'] ||
+        (exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.perfil in ['Administrador', 'Líder', 'Corretor', 'Assistente', 'Financeiro', 'Marketing']) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/administradores/$(request.auth.uid))
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Regra específica para a coleção de Horários Bloqueados
+    // ---------------------------------------------------------
+    match /blocked_slots/{slotId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Gestão de Perfis, Admins e Usuários
+    // ---------------------------------------------------------
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && request.auth.token.email in ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br', 'eliasborgess@hotmail.com']);
+    }
+
+    match /administradores/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && adminId == request.auth.uid && request.auth.token.email in ['luiz.uehara1@gmail.com', 'eliasborgess@creci.org.com.br', 'eliasborgess@hotmail.com']);
+    }
+
+    match /usuarios/{usuarioId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isSignedIn() && usuarioId == request.auth.uid);
+    }
+
+    match /notificacoes/{notificacaoId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Coleções Principais do Sistema
+    // ---------------------------------------------------------
+    match /imoveis/{imovelId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /leads/{leadId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /property_submissions/{submissionId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /visits/{visitId} {
+      allow create: if true;
+      allow read: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    match /favorites/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      match /items/{itemId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /corretores/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /proprietarios/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /locacoes/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /vendas/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /financeiro/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /transacoesFinanceiras/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /documentosGerados/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /agendamentos/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /visitas/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /solicitacoes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Configurações Globais do Site e Dropdowns Dinâmicos
+    // ---------------------------------------------------------
+    match /siteSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /tiposImovel/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /tiposNegocio/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /statusImovel/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /cidades/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /bairros/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicas/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /ambientes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicasEmpreendimento/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /lazer/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /instalacoes/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /acabamentos/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /proximidades/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /faixasPreco/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /caracteristicasApartamento/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /categoriasImovel/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------------------------------------------------------
+    // Bloqueio Final das Rules (Default Deny Catch-All)
+    // ---------------------------------------------------------
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
-

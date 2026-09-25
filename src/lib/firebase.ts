@@ -422,6 +422,7 @@ export function sanitizeFirestoreData(data: any): any {
 }
 
 const LOCAL_IMOVEIS_KEY = "rb_imoveis_cache_v1";
+const LOCAL_BLOCKED_SLOTS_KEY = "rb_blocked_slots_cache_v1";
 
 export const getLocalCache = (key: string = LOCAL_IMOVEIS_KEY): any[] => {
   try {
@@ -445,6 +446,15 @@ export const saveToLocalCache = (collectionName: string, item: any) => {
         current.unshift(item);
       }
       localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(current));
+    } else if (collectionName === "blocked_slots") {
+      const current = getLocalCache(LOCAL_BLOCKED_SLOTS_KEY);
+      const index = current.findIndex(s => s.id === item.id || (s.date === item.date && s.time === item.time));
+      if (index >= 0) {
+        current[index] = { ...current[index], ...item };
+      } else {
+        current.push(item);
+      }
+      localStorage.setItem(LOCAL_BLOCKED_SLOTS_KEY, JSON.stringify(current));
     }
   } catch (e) {
     console.warn("Erro ao salvar no localStorage cache:", e);
@@ -456,6 +466,8 @@ export const updateLocalCacheList = (collectionName: string, list: any[]) => {
     if (typeof window === 'undefined') return;
     if (collectionName === "imoveis") {
       localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(list));
+    } else if (collectionName === "blocked_slots") {
+      localStorage.setItem(LOCAL_BLOCKED_SLOTS_KEY, JSON.stringify(list));
     }
   } catch (e) {
     console.warn("Erro ao atualizar localStorage cache:", e);
@@ -469,6 +481,10 @@ export const removeFromLocalCache = (collectionName: string, id: string) => {
       const current = getLocalCache(LOCAL_IMOVEIS_KEY);
       const filtered = current.filter(p => p.id !== id && p.codigo !== id);
       localStorage.setItem(LOCAL_IMOVEIS_KEY, JSON.stringify(filtered));
+    } else if (collectionName === "blocked_slots") {
+      const current = getLocalCache(LOCAL_BLOCKED_SLOTS_KEY);
+      const filtered = current.filter(s => s.id !== id);
+      localStorage.setItem(LOCAL_BLOCKED_SLOTS_KEY, JSON.stringify(filtered));
     }
   } catch (e) {
     console.warn("Erro ao remover do localStorage cache:", e);
@@ -495,6 +511,261 @@ export const subscribeToVisits = (callback: (visits: any[]) => void) => {
 };
 
 /**
+ * Maps a raw Firestore document to a consistent, safe Property object.
+ * Guarantees that:
+ * 1. Cloudinary / image URLs are permanently preserved in images, fotos, image, additionalImages.
+ * 2. Characteristic texts are never changed, filtered away, or normalized into other words.
+ * 3. Descriptions and other textual attributes are never lost.
+ */
+export const mapFirestoreDocToProperty = (docId: string, data: any): any => {
+  if (!data) return null;
+
+  // Extract all clean permanent image URLs
+  const permanentUrls: string[] = [];
+  const addUrl = (u: any) => {
+    if (typeof u === 'string' && u.trim().startsWith('http')) {
+      const clean = u.trim();
+      if (!permanentUrls.includes(clean)) permanentUrls.push(clean);
+    }
+  };
+
+  if (Array.isArray(data.images)) data.images.forEach(addUrl);
+  if (Array.isArray(data.fotos)) {
+    data.fotos.forEach((f: any) => {
+      if (typeof f === 'string') addUrl(f);
+      else if (f?.secureUrl) addUrl(f.secureUrl);
+      else if (f?.url) addUrl(f.url);
+    });
+  }
+  if (Array.isArray(data.imagens)) {
+    data.imagens.forEach((f: any) => {
+      if (typeof f === 'string') addUrl(f);
+      else if (f?.secureUrl) addUrl(f.secureUrl);
+      else if (f?.url) addUrl(f.url);
+    });
+  }
+  if (data.fotoPrincipal) addUrl(data.fotoPrincipal);
+  if (data.image) addUrl(data.image);
+  if (Array.isArray(data.additionalImages)) data.additionalImages.forEach(addUrl);
+
+  const fallbackPlaceholder = "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80";
+  const mainImage = permanentUrls[0] || data.fotoPrincipal || data.image || fallbackPlaceholder;
+  const additionalImgs = permanentUrls.length > 1 ? permanentUrls.slice(1) : (Array.isArray(data.additionalImages) ? data.additionalImages : []);
+
+  // Format fotos as structured array of objects
+  const fotosFormatted = (permanentUrls.length > 0 ? permanentUrls : [mainImage]).map((url, idx) => ({
+    url,
+    secureUrl: url,
+    publicId: '',
+    originalFilename: url.split('/').pop() || `foto_${idx + 1}.jpg`,
+    ordem: idx
+  }));
+
+  // Clean and preserve list of characteristics preserving exact user text
+  const extractListStrings = (val: any): string[] => {
+    if (!Array.isArray(val)) return [];
+    return val
+      .filter((item: any) => {
+        if (item && typeof item === 'object') return item.ativo !== false;
+        return Boolean(item);
+      })
+      .map((item: any) => {
+        if (typeof item === 'string') return item.trim();
+        if (item && typeof item === 'object') return (item.nome || item.label || item.name || '').trim();
+        return String(item).trim();
+      })
+      .filter((s: string) => s.length > 0);
+  };
+
+  // Resolve standard identification values
+  const codigoImovelValue = data.codigoImovel || data.codigo || data.referencia || docId;
+  const titleValue = data.tituloAnuncio || data.titulo || data.title || "";
+  const typeValue = data.tipoImovel || data.tipo || data.type || "";
+  const cityValue = data.cidade || data.city || "";
+  const neighborhoodValue = data.bairro || data.neighborhood || "";
+  const statusValue = data.status || "Disponível";
+
+  const priceValueNum = Number(data.valorVenda || data.valorLocacao || data.valorAluguel || data.priceValue || 0);
+  const formattedPrice = data.preco || data.price || (priceValueNum ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(priceValueNum) : "Sob Consulta");
+
+  const bedsValue = data.dormitorios !== undefined ? Number(data.dormitorios) : (data.quartos !== undefined ? Number(data.quartos) : Number(data.beds || 0));
+  const bathsValue = data.banheiros !== undefined ? Number(data.banheiros) : Number(data.baths || 0);
+  const suitesValue = data.suites !== undefined ? Number(data.suites) : 0;
+  const parkingCoveredValue = data.vagas !== undefined ? Number(data.vagas) : Number(data.parkingCovered || 0);
+  const areaValue = data.areaPrivativa || data.areaTotal || data.area || "";
+
+  const desc = data.descricaoDetalhada || data.descricaoCompleta || data.descricao || data.description || "";
+
+  return {
+    ...data, // Preserve all base document properties so no custom fields are lost
+    id: docId,
+    // Identification
+    title: titleValue,
+    titulo: data.titulo || titleValue,
+    tituloAnuncio: data.tituloAnuncio || data.titulo || titleValue,
+    codigo: data.codigo || codigoImovelValue,
+    codigoImovel: codigoImovelValue,
+    type: typeValue,
+    tipoImovel: typeValue,
+    city: cityValue,
+    cidade: cityValue,
+    neighborhood: neighborhoodValue,
+    bairro: neighborhoodValue,
+    price: data.price || formattedPrice,
+    priceValue: priceValueNum,
+    status: statusValue,
+    category: data.category || "Residencial",
+    location: data.endereco || data.location || "",
+    endereco: data.endereco || data.location || "",
+    numero: data.numero || "",
+    complemento: data.complemento || "",
+    estado: data.estado || "SP",
+    matriculaImovel: data.matriculaImovel || "",
+    criImovel: data.criImovel || "",
+
+    // Full description synchronization
+    description: desc,
+    descricao: desc,
+    descricaoDetalhada: desc,
+    descricaoCompleta: desc,
+    subtituloAnuncio: data.subtituloAnuncio || "",
+    descricaoCurta: data.descricaoCurta || "",
+    diferenciaisAnuncio: data.diferenciaisAnuncio || "",
+    textoWhatsapp: data.textoWhatsapp || "",
+    textoInstagram: data.textoInstagram || "",
+    tituloSEO: data.tituloSEO || "",
+    descricaoSEO: data.descricaoSEO || "",
+    palavrasChaveSEO: data.palavrasChaveSEO || "",
+
+    // Visibility flags
+    mostrarNosFiltros: data.mostrarNosFiltros !== undefined ? data.mostrarNosFiltros : (data.mostrarCatalogo !== undefined ? data.mostrarCatalogo : true),
+    mostrarValorNoSite: data.mostrarValorNoSite !== undefined ? data.mostrarValorNoSite : true,
+    publicado: data.publicado === true,
+    publicadoNoSite: data.publicadoNoSite === true,
+    destaque: data.destaque || false,
+    destaqueNaHome: data.destaqueNaHome || false,
+    vendido: data.vendido === true,
+    disponivelParaVisita: data.disponivelParaVisita !== false,
+    disponivelParaProposta: data.disponivelParaProposta !== false,
+
+    // Dimensions & Spaces
+    beds: bedsValue,
+    dormitorios: bedsValue,
+    suites: suitesValue,
+    baths: bathsValue,
+    banheiros: bathsValue,
+    salas: Number(data.salas || 0),
+    parkingCovered: parkingCoveredValue,
+    vagas: parkingCoveredValue,
+    area: areaValue.toString(),
+    areaPrivativa: Number(data.areaPrivativa || parseFloat(areaValue) || 0),
+    areaTotal: Number(data.areaTotal || parseFloat(areaValue) || 0),
+
+    // Images & Gallery (Safe permanent URLs)
+    images: permanentUrls.length > 0 ? permanentUrls : [mainImage],
+    image: mainImage,
+    fotoPrincipal: mainImage,
+    additionalImages: additionalImgs,
+    fotos: fotosFormatted,
+
+    // Condominium & Business
+    condominium: data.nomeEdificio || data.condominium || "",
+    nomeEdificio: data.nomeEdificio || data.condominium || "",
+    condoValue: data.valorCondominio || data.condoValue || "",
+    purpose: data.tipoNegocio || data.purpose || "Venda",
+    tipoNegocio: data.tipoNegocio || data.purpose || "Venda",
+    coords: data.coords || [-23.5018, -47.4581],
+    createdAt: data.criadoEm || data.createdAt,
+    updatedAt: data.atualizadoEm || data.updatedAt,
+
+    // Financial Values
+    valorVenda: Number(data.valorVenda || 0),
+    valorAluguel: Number(data.valorAluguel || 0),
+    valorLocacao: Number(data.valorLocacao || data.valorAluguel || 0),
+    valorCondominio: Number(data.valorCondominio || 0),
+    valorIptu: Number(data.valorIptuAnual || data.valorIptu || 0),
+    valorIptuAnual: Number(data.valorIptuAnual || data.valorIptu || 0),
+    taxaLixo: Number(data.taxaLixoAnual || data.taxaLixo || 0),
+    taxaLixoAnual: Number(data.taxaLixoAnual || data.taxaLixo || 0),
+    iptuMensal: Number(data.iptuMensal || 0),
+    taxaLixoMensal: Number(data.taxaLixoMensal || 0),
+    valorTotalMensal: Number(data.valorTotalMensal || 0),
+    taxaGas: Number(data.taxaGas || 0),
+    taxaAgua: Number(data.taxaAgua || 0),
+    taxaLuz: Number(data.taxaLuz || 0),
+    seguroIncendio: Number(data.seguroIncendio || 0),
+    taxasAdicionais: Number(data.taxasAdicionais || 0),
+
+    garantiaLocaticia: data.garantiaLocaticia || "",
+    permitePet: data.permitePet || "",
+    mobiliadoStatus: data.mobiliadoStatus || "",
+    mobiliado: data.mobiliadoStatus === "Sim" || data.mobiliadoStatus === "Semi mobiliado" || !!data.mobiliado,
+    tempoMinimoContrato: data.tempoMinimoContrato || "",
+    statusLocacao: data.statusLocacao || "",
+    observacoesLocacao: data.observacoesLocacao || "",
+
+    aceitaFGTS: !!data.aceitaFGTS,
+    aceitaPermuta: !!data.aceitaPermuta,
+    aceitaFinanciamento: !!data.aceitaFinanciamento,
+    imovelAlugado: !!data.imovelAlugado,
+    eEdificio: !!data.eEdificio,
+    estaEmCondominio: !!data.estaEmCondominio,
+    alugado: !!data.alugado,
+    statusVenda: data.statusVenda || (statusValue === "Vendido" ? "Vendido" : "Disponível"),
+    disponivelParaVenda: data.disponivelParaVenda !== undefined ? !!data.disponivelParaVenda : true,
+    disponivelParaLocacao: data.disponivelParaLocacao !== undefined ? !!data.disponivelParaLocacao : true,
+    contratoLocacaoAtivo: !!data.contratoLocacaoAtivo,
+    gestaoLocacao: data.gestaoLocacao || null,
+
+    // Characteristics lists preserved exactly as user entered
+    caracteristicas: extractListStrings(data.caracteristicas),
+    ambientes: extractListStrings(data.ambientes),
+    caracteristicasEmpreendimento: extractListStrings(data.caracteristicasEmpreendimento || data.caracteristicasCondominio),
+    lazer: extractListStrings(data.lazer),
+    instalacoes: extractListStrings(data.instalacoes),
+    acabamentos: extractListStrings(data.acabamentos),
+    proximidades: extractListStrings(data.proximidades),
+  };
+};
+
+/**
+ * Directly fetch a single Property by its Firestore ID or property code.
+ */
+export const getPropertyById = async (id: string): Promise<any | null> => {
+  if (!id) return null;
+  try {
+    const docRef = doc(db, "imoveis", id);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return mapFirestoreDocToProperty(snap.id, snap.data());
+    }
+  } catch (err) {
+    console.warn(`Erro ao buscar imóvel por doc ID ${id}:`, err);
+  }
+
+  // Fallback: search by codigo / codigoImovel
+  try {
+    const qCode = query(collection(db, "imoveis"), where("codigoImovel", "==", id));
+    const snapCode = await getDocs(qCode);
+    if (!snapCode.empty) {
+      const docItem = snapCode.docs[0];
+      return mapFirestoreDocToProperty(docItem.id, docItem.data());
+    }
+  } catch (err) {
+    console.warn(`Erro ao buscar imóvel por codigo ${id}:`, err);
+  }
+
+  // Fallback to local cache
+  const cachedItems = getLocalCache(LOCAL_IMOVEIS_KEY);
+  if (Array.isArray(cachedItems)) {
+    const found = cachedItems.find((p: any) => p.id === id || p.codigo === id || p.codigoImovel === id);
+    if (found) return found;
+  }
+
+  return null;
+};
+
+/**
  * Listens to properties in real-time
  */
 export const subscribeToProperties = (callback: (properties: any[]) => void, isAdmin: boolean = false) => {
@@ -513,148 +784,7 @@ export const subscribeToProperties = (callback: (properties: any[]) => void, isA
   return onSnapshot(q, (snapshot) => {
     let list = snapshot.docs
       .filter(doc => doc.id !== "init" && doc.data()?.init !== true)
-      .map(doc => {
-        const data = doc.data();
-        
-        // Resolve standard identification values
-        const codigoImovelValue = data.codigoImovel || data.codigo || data.referencia || doc.id;
-        const titleValue = data.tituloAnuncio || data.titulo || data.title || "";
-        const typeValue = data.tipoImovel || data.tipo || data.type || "";
-        const cityValue = data.cidade || data.city || "";
-        const neighborhoodValue = data.bairro || data.neighborhood || "";
-        const statusValue = data.status || "Disponível";
-        
-        const priceValueNum = Number(data.valorVenda || data.valorLocacao || data.priceValue || 0);
-        const formattedPrice = data.preco || data.price || (priceValueNum ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(priceValueNum) : "Sob Consulta");
-
-        const bedsValue = data.dormitorios !== undefined ? Number(data.dormitorios) : (data.quartos !== undefined ? Number(data.quartos) : Number(data.beds || 0));
-        const bathsValue = data.banheiros !== undefined ? Number(data.banheiros) : Number(data.baths || 0);
-        const suitesValue = data.suites !== undefined ? Number(data.suites) : 0;
-        const parkingCoveredValue = data.vagas !== undefined ? Number(data.vagas) : Number(data.parkingCovered || 0);
-        
-        const areaValue = data.areaPrivativa || data.areaTotal || data.area || "";
-        const imagePrincipal = data.fotoPrincipal || data.imagens?.[0] || data.fotos?.[0] || data.image || "";
-        const fotosList = data.fotos || data.imagens || data.additionalImages || [];
-        const additionalImgsList = data.fotos ? data.fotos.slice(1) : (data.imagens ? data.imagens.slice(1) : data.additionalImages || []);
-
-        return {
-          id: doc.id,
-          // Mapped UI fields for React component compatibility
-          title: titleValue,
-          type: typeValue,
-          city: cityValue,
-          neighborhood: neighborhoodValue,
-          price: data.price || formattedPrice,
-          description: data.descricaoDetalhada || data.descricao || data.description || "",
-          descricaoDetalhada: data.descricaoDetalhada || data.descricaoCompleta || data.descricao || data.description || "",
-          tituloAnuncio: data.tituloAnuncio || data.titulo || data.title || "",
-          subtituloAnuncio: data.subtituloAnuncio || "",
-          descricaoCurta: data.descricaoCurta || "",
-          diferenciaisAnuncio: data.diferenciaisAnuncio || "",
-          textoWhatsapp: data.textoWhatsapp || "",
-          textoInstagram: data.textoInstagram || "",
-          tituloSEO: data.tituloSEO || "",
-          descricaoSEO: data.descricaoSEO || "",
-          palavrasChaveSEO: data.palavrasChaveSEO || "",
-          mostrarNosFiltros: data.mostrarNosFiltros !== undefined ? data.mostrarNosFiltros : (data.mostrarCatalogo !== undefined ? data.mostrarCatalogo : true),
-          mostrarValorNoSite: data.mostrarValorNoSite !== undefined ? data.mostrarValorNoSite : true,
-          beds: bedsValue,
-          suites: suitesValue,
-          baths: bathsValue,
-          parkingCovered: parkingCoveredValue,
-          area: areaValue.toString(),
-          image: imagePrincipal,
-          additionalImages: additionalImgsList,
-          status: statusValue,
-          priceValue: priceValueNum,
-          category: data.category || "Residencial",
-          location: data.endereco || data.location || "",
-          condominium: data.nomeEdificio || data.condominium || "",
-          condoValue: data.valorCondominio || data.condoValue || "",
-          purpose: data.tipoNegocio || data.purpose || "Venda",
-          tipoNegocio: data.tipoNegocio || data.purpose || "Venda",
-          featured: data.destaque || data.destaqueNaHome || data.featured || false,
-          coords: data.coords || [-23.5018, -47.4581],
-          createdAt: data.criadoEm || data.createdAt,
-          updatedAt: data.atualizadoEm || data.updatedAt,
-          
-          valorVenda: Number(data.valorVenda || 0),
-          valorAluguel: Number(data.valorAluguel || 0),
-          valorLocacao: Number(data.valorLocacao || data.valorAluguel || 0),
-          valorCondominio: Number(data.valorCondominio || 0),
-          valorIptu: Number(data.valorIptuAnual || data.valorIptu || 0),
-          valorIptuAnual: Number(data.valorIptuAnual || data.valorIptu || 0),
-          taxaLixo: Number(data.taxaLixoAnual || data.taxaLixo || 0),
-          taxaLixoAnual: Number(data.taxaLixoAnual || data.taxaLixo || 0),
-          iptuMensal: Number(data.iptuMensal || 0),
-          taxaLixoMensal: Number(data.taxaLixoMensal || 0),
-          valorTotalMensal: Number(data.valorTotalMensal || 0),
-          
-          garantiaLocaticia: data.garantiaLocaticia || "",
-          permitePet: data.permitePet || "",
-          mobiliadoStatus: data.mobiliadoStatus || "",
-          mobiliado: data.mobiliadoStatus === "Sim" || data.mobiliadoStatus === "Semi mobiliado" || !!data.mobiliado,
-          tempoMinimoContrato: data.tempoMinimoContrato || "",
-          statusLocacao: data.statusLocacao || "",
-          observacoesLocacao: data.observacoesLocacao || "",
-          
-          taxaGas: Number(data.taxaGas || 0),
-          taxaAgua: Number(data.taxaAgua || 0),
-          taxaLuz: Number(data.taxaLuz || 0),
-          seguroIncendio: Number(data.seguroIncendio || 0),
-          taxasAdicionais: Number(data.taxasAdicionais || 0),
-          
-          aceitaFGTS: !!data.aceitaFGTS,
-          aceitaPermuta: !!data.aceitaPermuta,
-          aceitaFinanciamento: !!data.aceitaFinanciamento,
-          imovelAlugado: !!data.imovelAlugado,
-          eEdificio: !!data.eEdificio,
-          estaEmCondominio: !!data.estaEmCondominio,
-          alugado: !!data.alugado,
-          statusVenda: data.statusVenda || (statusValue === "Vendido" ? "Vendido" : "Disponível"),
-          disponivelParaVenda: data.disponivelParaVenda !== undefined ? !!data.disponivelParaVenda : true,
-          disponivelParaLocacao: data.disponivelParaLocacao !== undefined ? !!data.disponivelParaLocacao : true,
-          contratoLocacaoAtivo: !!data.contratoLocacaoAtivo,
-          gestaoLocacao: data.gestaoLocacao || null,
-
-          // Exact Firestore standard fields
-          codigo: data.codigo || codigoImovelValue,
-          codigoImovel: codigoImovelValue,
-          titulo: data.titulo || titleValue,
-          nomeEdificio: data.nomeEdificio || data.condominium || "",
-          tipoImovel: typeValue,
-          publicado: data.publicado === true,
-          publicadoNoSite: data.publicadoNoSite === true,
-          vendido: data.vendido === true,
-          disponivelParaVisita: data.disponivelParaVisita !== false,
-          disponivelParaProposta: data.disponivelParaProposta !== false,
-          endereco: data.endereco || data.location || "",
-          numero: data.numero || "",
-          complemento: data.complemento || "",
-          bairro: neighborhoodValue,
-          cidade: cityValue,
-          estado: data.estado || "SP",
-          matriculaImovel: data.matriculaImovel || "",
-          criImovel: data.criImovel || "",
-          dormitorios: bedsValue,
-          salas: data.salas || 0,
-          vagas: parkingCoveredValue,
-          areaPrivativa: Number(data.areaPrivativa || parseFloat(areaValue) || 0),
-          areaTotal: Number(data.areaTotal || parseFloat(areaValue) || 0),
-          observacoes: data.observacoes || "",
-          fotos: fotosList,
-          fotoPrincipal: imagePrincipal,
-          destaque: data.destaque || false,
-          destaqueNaHome: data.destaqueNaHome || false,
-          caracteristicas: data.caracteristicas || [],
-          ambientes: data.ambientes || [],
-          caracteristicasEmpreendimento: data.caracteristicasEmpreendimento || [],
-          lazer: data.lazer || [],
-          instalacoes: data.instalacoes || [],
-          acabamentos: data.acabamentos || [],
-          proximidades: data.proximidades || [],
-        };
-      });
+      .map(doc => mapFirestoreDocToProperty(doc.id, doc.data()));
 
     // Merge with unsynced local cached properties
     const cachedItems = getLocalCache(LOCAL_IMOVEIS_KEY);
@@ -697,10 +827,41 @@ export const subscribeToProperties = (callback: (properties: any[]) => void, isA
 
 
 /**
- * Listens to blocked slots in real-time
+ * Listens to blocked slots in real-time (apenas para usuário administrativo autenticado)
  */
 export const subscribeToBlockedSlots = (callback: (slots: any[]) => void) => {
-  const q = query(collection(db, "blocked_slots"));
+  // Pre-carregar dados locais para resposta instantânea
+  const cachedList = getLocalCache(LOCAL_BLOCKED_SLOTS_KEY);
+  if (Array.isArray(cachedList) && cachedList.length > 0) {
+    callback(cachedList);
+  }
+
+  // 4. Verificar se o usuário está autenticado antes de iniciar o listener do Firestore
+  if (!auth.currentUser) {
+    console.log("HORARIOS BLOQUEADOS DEBUG - USUÁRIO NÃO AUTENTICADO", {
+      path: "blocked_slots",
+      uid: null,
+      email: null,
+      authCurrentUser: null,
+      authenticated: false,
+      operacao: "listen_aborted_unauthenticated"
+    });
+    return () => {};
+  }
+
+  const path = "blocked_slots";
+
+  // 3. Log de diagnóstico pré-onSnapshot
+  console.log("HORARIOS BLOQUEADOS DEBUG", {
+    path,
+    uid: auth.currentUser?.uid,
+    email: auth.currentUser?.email,
+    authCurrentUser: auth.currentUser,
+    operacao: "onSnapshot_listener",
+    authenticated: !!auth.currentUser
+  });
+
+  const q = query(collection(db, path));
   return onSnapshot(q, (snapshot) => {
     const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
     list.sort((a, b) => {
@@ -708,10 +869,46 @@ export const subscribeToBlockedSlots = (callback: (slots: any[]) => void) => {
       if (dateCompare !== 0) return dateCompare;
       return (b.time || "").localeCompare(a.time || "");
     });
+    updateLocalCacheList("blocked_slots", list);
     callback(list);
-  }, (error) => {
-    console.error("Erro no listener de horários bloqueados:", error);
-    callback([]);
+  }, (error: any) => {
+    // 6. Separação explícita de tipos de erro
+    const isPermissionError = error?.code === 'permission-denied' || 
+      (typeof error?.message === 'string' && (
+        error.message.includes('permission') || 
+        error.message.includes('insufficient') ||
+        error.message.includes('Missing or insufficient')
+      ));
+
+    const isNetworkError = error?.code === 'unavailable' || 
+      (typeof error?.message === 'string' && (
+        error.message.includes('network') || 
+        error.message.includes('offline') ||
+        error.message.includes('Failed to get document')
+      ));
+
+    if (isPermissionError) {
+      console.error("FIRESTORE PERMISSION-DENIED em 'blocked_slots':", {
+        tipoErro: "permission-denied",
+        mensagem: error?.message,
+        codigo: error?.code,
+        path,
+        uid: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        authStatus: "autenticado_mas_sem_permissao_nas_regras"
+      });
+    } else if (isNetworkError) {
+      console.warn("ERRO DE REDE no listener de horários bloqueados:", {
+        tipoErro: "network_unavailable",
+        mensagem: error?.message,
+        codigo: error?.code
+      });
+    } else {
+      console.warn("ERRO GENÉRICO no listener de horários bloqueados:", error);
+    }
+
+    const fallbackList = getLocalCache(LOCAL_BLOCKED_SLOTS_KEY);
+    callback(Array.isArray(fallbackList) ? fallbackList : []);
   });
 };
 
@@ -808,9 +1005,54 @@ const buildStandardPropertyDoc = (propertyData: any, isNew: boolean) => {
 
   const tituloValue = propertyData.title || propertyData.titulo || "";
   const codeValue = propertyData.codigo || propertyData.codigoImovel || "";
-  const mainImage = propertyData.image || propertyData.fotoPrincipal || "";
-  const additionalImgs = propertyData.additionalImages || propertyData.fotos?.slice(1) || [];
-  const fotosArray = [mainImage, ...additionalImgs].filter(Boolean);
+
+  // Extract all clean permanent Cloudinary / image URLs
+  const permanentUrls: string[] = [];
+  const addPermanentUrl = (u: any) => {
+    if (typeof u === 'string' && u.trim().startsWith('http')) {
+      const clean = u.trim();
+      if (!permanentUrls.includes(clean)) permanentUrls.push(clean);
+    }
+  };
+
+  if (Array.isArray(propertyData.images)) propertyData.images.forEach(addPermanentUrl);
+  if (Array.isArray(propertyData.fotos)) {
+    propertyData.fotos.forEach((f: any) => {
+      if (typeof f === 'string') addPermanentUrl(f);
+      else if (f?.secureUrl) addPermanentUrl(f.secureUrl);
+      else if (f?.url) addPermanentUrl(f.url);
+    });
+  }
+  if (Array.isArray(propertyData.imagens)) {
+    propertyData.imagens.forEach((f: any) => {
+      if (typeof f === 'string') addPermanentUrl(f);
+      else if (f?.secureUrl) addPermanentUrl(f.secureUrl);
+      else if (f?.url) addPermanentUrl(f.url);
+    });
+  }
+  if (propertyData.fotoPrincipal) addPermanentUrl(propertyData.fotoPrincipal);
+  if (propertyData.image) addPermanentUrl(propertyData.image);
+  if (Array.isArray(propertyData.additionalImages)) propertyData.additionalImages.forEach(addPermanentUrl);
+
+  const fallbackPlaceholder = "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80";
+  const mainImage = permanentUrls[0] || propertyData.fotoPrincipal || propertyData.image || fallbackPlaceholder;
+  const additionalImgs = permanentUrls.length > 1 ? permanentUrls.slice(1) : (Array.isArray(propertyData.additionalImages) ? propertyData.additionalImages : []);
+
+  // Clean and preserve list of characteristics preserving exact user text
+  const cleanStringsList = (list: any): string[] => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((item: any) => {
+        if (item && typeof item === 'object') return item.ativo !== false;
+        return Boolean(item);
+      })
+      .map((item: any) => {
+        if (typeof item === 'string') return item.trim();
+        if (item && typeof item === 'object') return (item.nome || item.label || item.name || '').trim();
+        return String(item).trim();
+      })
+      .filter((s: string) => s.length > 0);
+  };
 
   const tipoNegocioValue = propertyData.tipoNegocio || propertyData.purpose || "Venda";
   const valorVenda = (tipoNegocioValue === "Locação") ? 0 : Number(propertyData.valorVenda || 0);
@@ -1003,48 +1245,28 @@ const buildStandardPropertyDoc = (propertyData: any, isNew: boolean) => {
     palavrasChaveSEO: propertyData.palavrasChaveSEO || "",
     observacoes: propertyData.observacoes || "",
 
-    fotos: (propertyData.fotos && Array.isArray(propertyData.fotos) && propertyData.fotos.length > 0)
-      ? propertyData.fotos.map((f: any, idx: number) => {
-          if (typeof f === 'string') {
-            return {
-              url: f,
-              secureUrl: f,
-              publicId: '',
-              originalFilename: '',
-              ordem: idx
-            };
-          }
-          return {
-            url: f.url || f.secureUrl || '',
-            secureUrl: f.secureUrl || f.url || '',
-            publicId: f.publicId || '',
-            originalFilename: f.originalFilename || '',
-            ordem: f.ordem !== undefined ? Number(f.ordem) : idx
-          };
-        })
-      : (fotosArray.map((url, i) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: '',
-          ordem: i
-        }))),
-    fotoPrincipal: propertyData.fotoPrincipal || mainImage || "",
-    image: propertyData.fotoPrincipal || mainImage || "",
-    additionalImages: propertyData.additionalImages || (Array.isArray(propertyData.fotos) 
-      ? propertyData.fotos.slice(1).map((f: any) => typeof f === 'string' ? f : (f.secureUrl || f.url || '')) 
-      : additionalImgs),
+    fotos: (permanentUrls.length > 0 ? permanentUrls : [mainImage]).map((url, idx) => ({
+      url,
+      secureUrl: url,
+      publicId: '',
+      originalFilename: url.split('/').pop() || `foto_${idx + 1}.jpg`,
+      ordem: idx
+    })),
+    images: permanentUrls.length > 0 ? permanentUrls : [mainImage],
+    fotoPrincipal: mainImage,
+    image: mainImage,
+    additionalImages: additionalImgs,
 
     destaque: propertyData.featured === true || propertyData.destaque === true,
     destaqueNaHome: propertyData.featured === true || propertyData.destaqueNaHome === true,
 
-    caracteristicas: propertyData.caracteristicas || [],
-    ambientes: propertyData.ambientes || [],
-    caracteristicasEmpreendimento: propertyData.caracteristicasEmpreendimento || [],
-    lazer: propertyData.lazer || [],
-    instalacoes: propertyData.instalacoes || [],
-    acabamentos: propertyData.acabamentos || [],
-    proximidades: propertyData.proximidades || [],
+    caracteristicas: cleanStringsList(propertyData.caracteristicas),
+    ambientes: cleanStringsList(propertyData.ambientes),
+    caracteristicasEmpreendimento: cleanStringsList(propertyData.caracteristicasEmpreendimento || propertyData.caracteristicasCondominio),
+    lazer: cleanStringsList(propertyData.lazer),
+    instalacoes: cleanStringsList(propertyData.instalacoes),
+    acabamentos: cleanStringsList(propertyData.acabamentos),
+    proximidades: cleanStringsList(propertyData.proximidades),
     coords: propertyData.coords || [-23.5018, -47.4581],
 
     atualizadoEm: serverTimestamp()
@@ -1788,7 +2010,7 @@ export const updatePropertyInInventory = async (id: string, propertyData: any) =
     };
 
     const firestoreData = sanitizeFirestoreData(buildStandardPropertyDoc(dataWithCode, false));
-    await updateDoc(docRef, firestoreData);
+    await setDoc(docRef, firestoreData, { merge: true });
     
     // Update local cache
     try {
@@ -1949,8 +2171,11 @@ export const blockSlot = async (slotData: { date: string; time: string; reason?:
       ...slotData,
       createdAt: serverTimestamp(),
     });
+    saveToLocalCache("blocked_slots", { id: docRef.id, ...slotData });
     return { success: true, id: docRef.id };
   } catch (error) {
+    const fallbackId = 'local_' + Date.now();
+    saveToLocalCache("blocked_slots", { id: fallbackId, ...slotData });
     throw handleFirestoreError(error, 'create', 'blocked_slots');
   }
 };
@@ -1968,8 +2193,11 @@ export const getBlockedSlots = async () => {
       if (dateCompare !== 0) return dateCompare;
       return (b.time || "").localeCompare(a.time || "");
     });
+    updateLocalCacheList("blocked_slots", list);
     return list;
   } catch (error) {
+    const cached = getLocalCache(LOCAL_BLOCKED_SLOTS_KEY);
+    if (Array.isArray(cached) && cached.length > 0) return cached;
     throw handleFirestoreError(error, 'list', 'blocked_slots');
   }
 };
@@ -1979,9 +2207,11 @@ export const getBlockedSlots = async () => {
  */
 export const unblockSlot = async (slotId: string) => {
   try {
+    removeFromLocalCache("blocked_slots", slotId);
     await deleteDoc(doc(db, "blocked_slots", slotId));
     return { success: true };
   } catch (error) {
+    removeFromLocalCache("blocked_slots", slotId);
     throw handleFirestoreError(error, 'delete', `blocked_slots/${slotId}`);
   }
 };

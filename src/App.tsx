@@ -159,6 +159,10 @@ interface Property {
   areaUseful?: string;
   image: string;
   additionalImages?: string[]; // Imagens
+  images?: string[];
+  fotos?: any[];
+  fotoPrincipal?: string;
+  imagens?: any[];
   featured?: boolean;
   priceValue: number;
   coords: [number, number];
@@ -1045,11 +1049,31 @@ function PropertyDetailModal({
 }) {
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   
-  const mediaItems = [
-    { type: 'image', url: property.image },
-    ...(property.additionalImages || []).map(url => ({ type: 'image', url })),
-    ...(property.videoUrl ? [{ type: 'video', url: property.videoUrl }] : [])
+  const rawImages: string[] = [];
+  const addRaw = (u: any) => {
+    if (typeof u === 'string' && u.trim().startsWith('http') && !rawImages.includes(u.trim())) {
+      rawImages.push(u.trim());
+    }
+  };
+  if (Array.isArray(property.images)) property.images.forEach(addRaw);
+  if (Array.isArray(property.fotos)) {
+    property.fotos.forEach((f: any) => {
+      if (typeof f === 'string') addRaw(f);
+      else if (f?.secureUrl) addRaw(f.secureUrl);
+      else if (f?.url) addRaw(f.url);
+    });
+  }
+  if (property.fotoPrincipal) addRaw(property.fotoPrincipal);
+  if (property.image) addRaw(property.image);
+  if (Array.isArray(property.additionalImages)) property.additionalImages.forEach(addRaw);
+
+  const mediaItems: { type: 'image' | 'video'; url: string }[] = [
+    ...rawImages.map(url => ({ type: 'image' as const, url })),
+    ...(property.videoUrl ? [{ type: 'video' as const, url: property.videoUrl }] : [])
   ];
+  if (mediaItems.length === 0) {
+    mediaItems.push({ type: 'image' as const, url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80' });
+  }
 
   const nextMedia = () => {
     setCurrentMediaIndex((prev) => (prev + 1) % mediaItems.length);
@@ -1209,12 +1233,70 @@ function PropertyDetailModal({
                 </div>
               </div>
 
-              {property.description && (
+              {Boolean(property.description || (property as any).descricaoDetalhada || (property as any).descricao || (property as any).descricaoCompleta) && (
                 <div className="space-y-3 md:space-y-4">
                   <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Descrição do Imóvel</h4>
-                  <p className="text-white/70 leading-relaxed text-sm whitespace-pre-wrap">{property.description}</p>
+                  <p className="text-white/70 leading-relaxed text-sm whitespace-pre-wrap">{property.description || (property as any).descricaoDetalhada || (property as any).descricao || (property as any).descricaoCompleta}</p>
                 </div>
               )}
+
+              {/* Características e Ficha Técnica com preservação literal */}
+              {(() => {
+                const formatLabel = (item: any): string => {
+                  if (!item) return '';
+                  if (typeof item === 'string') return item.trim();
+                  const n = item.nome || item.label || item.texto || item.name || '';
+                  const qty = item.quantidade !== undefined ? Number(item.quantidade) : (item.count !== undefined ? Number(item.count) : undefined);
+                  if (qty !== undefined && qty > 1) {
+                    return `${n} (${qty})`;
+                  }
+                  return String(n).trim();
+                };
+
+                const groups: { title: string; items: any[] }[] = [
+                  { title: "Características do Imóvel", items: Array.isArray(property.caracteristicas) ? property.caracteristicas : [] },
+                  { title: "Ambientes", items: Array.isArray((property as any).ambientes) ? (property as any).ambientes : [] },
+                  { title: "Lazer e Convivência", items: Array.isArray((property as any).lazer) ? (property as any).lazer : [] },
+                  { title: "Empreendimento / Condomínio", items: Array.isArray(property.caracteristicasEmpreendimento || (property as any).caracteristicasCondominio) ? (property.caracteristicasEmpreendimento || (property as any).caracteristicasCondominio) : [] },
+                  { title: "Instalações", items: Array.isArray((property as any).instalacoes) ? (property as any).instalacoes : [] },
+                  { title: "Acabamentos", items: Array.isArray((property as any).acabamentos) ? (property as any).acabamentos : [] },
+                  { title: "Proximidades", items: Array.isArray((property as any).proximidades) ? (property as any).proximidades : [] }
+                ].filter(g => g.items.length > 0);
+
+                if (groups.length === 0) return null;
+
+                return (
+                  <div className="space-y-4 pt-4 border-t border-white/10">
+                    <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">
+                      Características do Imóvel
+                    </h4>
+                    <div className="space-y-4">
+                      {groups.map((group, gIdx) => (
+                        <div key={gIdx} className="space-y-2">
+                          <p className="text-[10px] md:text-xs font-black uppercase text-white/50 tracking-wider">
+                            {group.title}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {group.items.map((item, iIdx) => {
+                              const label = formatLabel(item);
+                              if (!label) return null;
+                              return (
+                                <span
+                                  key={iIdx}
+                                  className="inline-flex items-center px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white/90 text-xs font-medium"
+                                >
+                                  <Check size={12} className="text-brand-orange mr-1.5 shrink-0" />
+                                  {label}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               
               <div className="space-y-4 md:space-y-6">
                 <h4 className="text-xs md:text-sm font-black uppercase tracking-widest text-brand-orange border-l-2 border-brand-orange pl-4">Valores e Condições</h4>
@@ -4030,10 +4112,13 @@ export default function App() {
     // Só inicia listeners após carregar o auth para evitar permission-denied precoces
     if (isAuthLoading) return;
 
-    // Listeners em tempo real
-    const unsubscribeSlots = subscribeToBlockedSlots((slots) => {
-      setBlockedSlots(slots);
-    });
+    // Listeners em tempo real: horários bloqueados apenas quando o usuário administrativo estiver autenticado
+    let unsubscribeSlots: (() => void) | undefined;
+    if (currentUser && isAuthorized) {
+      unsubscribeSlots = subscribeToBlockedSlots((slots) => {
+        setBlockedSlots(slots);
+      });
+    }
     
     const unsubscribeProperties = subscribeToProperties((props) => {
       setProperties(props as Property[]);
@@ -4090,7 +4175,7 @@ export default function App() {
     }, (error) => console.warn("Permissão de leitura negada para siteSettings/appearance:", error));
 
     return () => {
-      unsubscribeSlots();
+      if (unsubscribeSlots) unsubscribeSlots();
       unsubscribeProperties();
       if (unsubscribeVisits) unsubscribeVisits();
       unsubTiposImovel();
@@ -4112,7 +4197,7 @@ export default function App() {
       unsubCompany();
       unsubAppearance();
     };
-  }, [isAuthorized, isAuthLoading]);
+  }, [isAuthorized, isAuthLoading, currentUser]);
 
   // Dynamic Theme Integration with siteAppearance and siteCompany
   useEffect(() => {

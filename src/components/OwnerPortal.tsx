@@ -105,6 +105,8 @@ export interface Property {
   areaUseful?: string;
   image: string;
   additionalImages?: string[];
+  images?: string[];
+  imagens?: any[];
   fotos?: any[];
   fotoPrincipal?: string;
   featured?: boolean;
@@ -549,6 +551,7 @@ async function carregarLocacoesSeguro(user: any): Promise<any[]> {
 interface OptionItem {
   id?: string;
   nome: string;
+  ativo?: boolean;
   permiteQuantidade?: boolean;
 }
 
@@ -563,7 +566,7 @@ interface OptionsChecklistProps {
   descricao?: string;
   categoria: string;
   opcoes: OptionItem[];
-  valores: ValueItem[];
+  valores: (ValueItem | string | any)[];
   onChange: (categoria: string, nome: string, checked: boolean) => void;
   onQuantidadeChange: (categoria: string, nome: string, quantidade: number) => void;
   searchPlaceholder?: string;
@@ -577,20 +580,62 @@ function OptionsChecklist({
   valores = [],
   onChange,
   onQuantidadeChange,
-  searchPlaceholder = "Pesquisar..."
+  searchPlaceholder = "Pesquisar ou adicionar..."
 }: OptionsChecklistProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [customInput, setCustomInput] = useState('');
+
+  // Combine preset options with any custom active values so that user-entered characteristics are NEVER lost
+  const allOpcoes = useMemo(() => {
+    const map = new Map<string, OptionItem>();
+    opcoes.forEach(opt => {
+      if (opt && opt.nome) {
+        map.set(opt.nome.trim().toLowerCase(), {
+          ...opt,
+          nome: opt.nome.trim()
+        });
+      }
+    });
+    valores.forEach(v => {
+      const nome = (typeof v === 'string' ? v : (v?.nome || '')).trim();
+      const isActive = typeof v === 'string' ? true : (v?.ativo !== false);
+      if (nome && isActive && !map.has(nome.toLowerCase())) {
+        map.set(nome.toLowerCase(), {
+          id: `custom_${nome}`,
+          nome,
+          ativo: true,
+          permiteQuantidade: typeof v === 'object' && (v?.quantidade || 0) > 0
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [opcoes, valores]);
 
   const filteredOpcoes = useMemo(() => {
-    return opcoes.filter(opt => {
+    return allOpcoes.filter(opt => {
       const nome = opt.nome || '';
       return nome.toLowerCase().includes(searchQuery.toLowerCase());
     });
-  }, [opcoes, searchQuery]);
+  }, [allOpcoes, searchQuery]);
 
   const shouldShowQty = (opcao: OptionItem) => {
     if (opcao.permiteQuantidade === false) return false;
     return true; // default to true so users can specify counts on items when active
+  };
+
+  const activeCount = useMemo(() => {
+    return (valores || []).filter((v: any) => {
+      if (typeof v === 'string') return Boolean(v.trim());
+      return v?.ativo !== false;
+    }).length;
+  }, [valores]);
+
+  const handleAddCustom = (textToAdd: string) => {
+    const clean = textToAdd.trim();
+    if (!clean) return;
+    onChange(categoria, clean, true);
+    setCustomInput('');
+    setSearchQuery('');
   };
 
   return (
@@ -603,27 +648,58 @@ function OptionsChecklist({
           {descricao && <p className="text-[9px] text-[#A1A19A] mt-1 uppercase font-bold tracking-wider">{descricao}</p>}
         </div>
         <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest font-mono">
-          {valores.filter(v => v.ativo).length} marcados
+          {activeCount} marcados
         </span>
       </div>
 
-      {opcoes.length > 5 && (
+      <div className="flex gap-2">
         <input
           type="text"
           placeholder={searchPlaceholder}
-          className="w-full bg-[#F6F6F4] border border-[#EFEFEA] rounded-lg px-3 py-1.5 text-[10px] outline-none focus:ring-1 focus:ring-amber-500 font-semibold"
+          className="flex-1 bg-[#F6F6F4] border border-[#EFEFEA] rounded-lg px-3 py-1.5 text-[10px] outline-none focus:ring-1 focus:ring-amber-500 font-semibold"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (searchQuery.trim()) {
+                handleAddCustom(searchQuery);
+              }
+            }
+          }}
         />
-      )}
+        {searchQuery.trim() && !filteredOpcoes.some(o => o.nome.toLowerCase() === searchQuery.trim().toLowerCase()) && (
+          <button
+            type="button"
+            onClick={() => handleAddCustom(searchQuery)}
+            className="bg-amber-500 hover:bg-amber-600 text-stone-900 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors shrink-0"
+          >
+            + Adicionar "{searchQuery.trim()}"
+          </button>
+        )}
+      </div>
 
       {filteredOpcoes.length === 0 ? (
-        <p className="text-[10px] text-slate-400 italic py-2">Sem opções de filtro.</p>
+        <div className="py-3 text-center">
+          <p className="text-[10px] text-slate-400 italic">Nenhuma opção encontrada para "{searchQuery}".</p>
+          {searchQuery.trim() && (
+            <button
+              type="button"
+              onClick={() => handleAddCustom(searchQuery)}
+              className="mt-2 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              + Adicionar característica: "{searchQuery.trim()}"
+            </button>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto mt-2 p-1 pr-2">
           {filteredOpcoes.map((opcao) => {
-            const itemSelecionado = valores.find((item) => item.nome === opcao.nome);
-            const marcado = Boolean(itemSelecionado?.ativo);
+            const itemSelecionado = valores.find((item) => {
+              const itemNome = typeof item === 'string' ? item : item?.nome;
+              return itemNome?.trim().toLowerCase() === opcao.nome?.trim().toLowerCase();
+            });
+            const marcado = Boolean(itemSelecionado && (typeof itemSelecionado === 'string' ? true : itemSelecionado.ativo !== false));
             const showQty = marcado && shouldShowQty(opcao);
 
             return (
@@ -652,7 +728,7 @@ function OptionsChecklist({
                       type="number"
                       min="0"
                       className="w-10 text-center bg-white border border-[#EFEFEA] rounded text-[10px] font-black text-stone-700 p-0.5 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                      value={itemSelecionado?.quantidade ?? 0}
+                      value={typeof itemSelecionado === 'object' ? (itemSelecionado?.quantidade ?? 0) : 0}
                       onChange={(e) =>
                         onQuantidadeChange(
                           categoria,
@@ -668,6 +744,31 @@ function OptionsChecklist({
           })}
         </div>
       )}
+
+      {/* Inline custom characteristic adder */}
+      <div className="flex gap-2 pt-2 border-t border-slate-100 mt-2">
+        <input
+          type="text"
+          placeholder="Adicionar característica personalizada..."
+          className="flex-1 bg-[#F6F6F4] border border-[#EFEFEA] rounded-lg px-3 py-1.5 text-[10px] outline-none focus:ring-1 focus:ring-amber-500 font-semibold"
+          value={customInput}
+          onChange={(e) => setCustomInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleAddCustom(customInput);
+            }
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => handleAddCustom(customInput)}
+          disabled={!customInput.trim()}
+          className="bg-stone-900 hover:bg-amber-500 hover:text-stone-900 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-colors disabled:opacity-40 cursor-pointer"
+        >
+          + Adicionar
+        </button>
+      </div>
     </div>
   );
 }
@@ -974,6 +1075,9 @@ export default function OwnerPortal({
   }, [opcoesCadastro]);
 
   const handleToggleOpcao = (categoria: string, nome: string, checked: boolean) => {
+    const trimmedNome = (nome || '').trim();
+    if (!trimmedNome) return;
+
     setNewProperty((prev: any) => {
       const listaAtual = Array.isArray(prev[categoria]) ? prev[categoria] : [];
       let novaLista;
@@ -981,17 +1085,17 @@ export default function OwnerPortal({
       if (checked) {
         const jaExiste = listaAtual.some((item: any) => {
           const itemNome = typeof item === 'string' ? item : item?.nome;
-          return itemNome === nome;
+          return itemNome?.trim().toLowerCase() === trimmedNome.toLowerCase();
         });
 
         if (jaExiste) {
           novaLista = listaAtual.map((item: any) => {
             const itemNome = typeof item === 'string' ? item : item?.nome;
-            if (itemNome === nome) {
+            if (itemNome?.trim().toLowerCase() === trimmedNome.toLowerCase()) {
               if (typeof item === 'string') {
-                return { nome: item, ativo: true, quantidade: (categoria === 'ambientes' ? 1 : 0) };
+                return { nome: trimmedNome, ativo: true, quantidade: (categoria === 'ambientes' ? 1 : 0) };
               }
-              return { ...item, ativo: true };
+              return { ...item, nome: trimmedNome, ativo: true };
             }
             return item;
           });
@@ -999,18 +1103,19 @@ export default function OwnerPortal({
           novaLista = [
             ...listaAtual,
             {
-              nome,
+              nome: trimmedNome,
               ativo: true,
               quantidade: (categoria === 'ambientes' ? 1 : 0)
             }
           ];
         }
       } else {
+        // When unchecking, remove or set ativo: false
         novaLista = listaAtual.map((item: any) => {
           const itemNome = typeof item === 'string' ? item : item?.nome;
-          if (itemNome === nome) {
+          if (itemNome?.trim().toLowerCase() === trimmedNome.toLowerCase()) {
             if (typeof item === 'string') {
-              return { nome: item, ativo: false, quantidade: 0 };
+              return { nome: trimmedNome, ativo: false, quantidade: 0 };
             }
             return { ...item, ativo: false, quantidade: 0 };
           }
@@ -1026,24 +1131,19 @@ export default function OwnerPortal({
   };
 
   const handleQuantidadeOpcao = (categoria: string, nome: string, quantidade: number) => {
+    const trimmedNome = (nome || '').trim();
+    if (!trimmedNome) return;
+
     setNewProperty((prev: any) => {
       const listaAtual = Array.isArray(prev[categoria]) ? prev[categoria] : [];
 
       const novaLista = listaAtual.map((item: any) => {
         const itemNome = typeof item === 'string' ? item : item?.nome;
-        if (itemNome === nome) {
+        if (itemNome?.trim().toLowerCase() === trimmedNome.toLowerCase()) {
           if (typeof item === 'string') {
-            return {
-              nome,
-              quantidade: Number(quantidade || 0),
-              ativo: true
-            };
+            return { nome: trimmedNome, ativo: true, quantidade };
           }
-          return {
-            ...item,
-            quantidade: Number(quantidade || 0),
-            ativo: true
-          };
+          return { ...item, quantidade, ativo: quantidade > 0 ? true : item.ativo };
         }
         return item;
       });
@@ -3362,18 +3462,58 @@ export default function OwnerPortal({
     setIsSubmitting(true);
     
     try {
-      const validUrls = imageUrls.filter(url => url.trim() !== '');
+      const validUrls = imageUrls.filter(url => typeof url === 'string' && url.trim().startsWith('http'));
       
-      const limparOpcoesAtivas = (lista: any[]) => {
-        return Array.isArray(lista)
-          ? lista.filter((item: any) => {
-              if (item && typeof item === 'object') {
-                return item.ativo === true;
-              }
-              return true;
-            })
-          : [];
+      const limparOpcoesAtivas = (lista: any[]): string[] => {
+        if (!Array.isArray(lista)) return [];
+        return lista
+          .filter((item: any) => {
+            if (item && typeof item === 'object') {
+              return item.ativo !== false;
+            }
+            return Boolean(item);
+          })
+          .map((item: any) => {
+            if (typeof item === 'string') return item.trim();
+            if (item && typeof item === 'object') {
+              return (item.nome || item.label || item.name || '').trim();
+            }
+            return String(item).trim();
+          })
+          .filter((s: string) => s.length > 0);
       };
+
+      // Extract all permanent URLs
+      const permanentUrls: string[] = [];
+      const addPermanent = (u: any) => {
+        if (typeof u === 'string' && u.trim().startsWith('http')) {
+          const clean = u.trim();
+          if (!permanentUrls.includes(clean)) permanentUrls.push(clean);
+        }
+      };
+
+      if (Array.isArray(newProperty.images)) newProperty.images.forEach(addPermanent);
+      if (Array.isArray(newProperty.fotos)) {
+        newProperty.fotos.forEach((f: any) => {
+          if (typeof f === 'string') addPermanent(f);
+          else if (f?.secureUrl) addPermanent(f.secureUrl);
+          else if (f?.url) addPermanent(f.url);
+        });
+      }
+      validUrls.forEach(addPermanent);
+      if (newProperty.fotoPrincipal) addPermanent(newProperty.fotoPrincipal);
+      if (newProperty.image) addPermanent(newProperty.image);
+      if (Array.isArray(newProperty.additionalImages)) newProperty.additionalImages.forEach(addPermanent);
+
+      const mainPic = permanentUrls[0] || newProperty.fotoPrincipal || newProperty.image || validUrls[0] || '';
+      const additionalImgs = permanentUrls.length > 1 ? permanentUrls.slice(1) : (newProperty.additionalImages || validUrls.slice(1));
+      const fotosFormatted = (permanentUrls.length > 0 ? permanentUrls : (mainPic ? [mainPic] : [])).map((u, i) => ({
+        url: u,
+        secureUrl: u,
+        publicId: '',
+        originalFilename: u.split('/').pop() || `foto_${i + 1}.jpg`,
+        ordem: i
+      }));
 
       // Attach statusNotes to the last log entry in approvalHistory if present
       let finalHistory = Array.isArray(newProperty.approvalHistory) ? [...newProperty.approvalHistory] : [];
@@ -3391,8 +3531,14 @@ export default function OwnerPortal({
         });
       }
 
+      const desc = newProperty.descricaoDetalhada || newProperty.description || newProperty.descricao || '';
+
       const propertyData = {
         ...newProperty,
+        description: desc,
+        descricao: desc,
+        descricaoDetalhada: desc,
+        descricaoCompleta: desc,
         approvalStatus: newProperty.approvalStatus || 'Rascunho',
         approvalHistory: finalHistory,
         statusNotes: '', // reset in DB
@@ -3406,30 +3552,23 @@ export default function OwnerPortal({
             : `R$ ${Number(newProperty.valorVenda || 0).toLocaleString('pt-BR')}`,
         condoValue: newProperty.valorCondominio ? `R$ ${Number(newProperty.valorCondominio).toLocaleString('pt-BR')}` : '',
         
-        fotos: newProperty.fotos || validUrls.map((u, i) => ({
-          url: u,
-          secureUrl: u,
-          publicId: '',
-          originalFilename: u.split('/').pop() || '',
-          ordem: i
-        })),
-        fotoPrincipal: newProperty.fotoPrincipal || validUrls[0] || newProperty.image || '',
-        image: newProperty.fotoPrincipal || validUrls[0] || newProperty.image || '',
-        additionalImages: newProperty.fotos 
-          ? newProperty.fotos.slice(1).map((f: any) => f.secureUrl || f.url || '')
-          : validUrls.slice(1),
+        images: permanentUrls,
+        fotos: fotosFormatted,
+        fotoPrincipal: mainPic,
+        image: mainPic,
+        additionalImages: additionalImgs,
         ownerId: currentUser?.uid || '',
         emailProprietario: currentUser?.email || '',
         proprietarioId: currentUser?.uid || '',
 
-        // Filter active checkboxes
+        // Filter active checkboxes preserving exact names
         caracteristicas: limparOpcoesAtivas(newProperty.caracteristicas || []),
         ambientes: limparOpcoesAtivas(newProperty.ambientes || []),
         lazer: limparOpcoesAtivas(newProperty.lazer || []),
         instalacoes: limparOpcoesAtivas(newProperty.instalacoes || []),
         acabamentos: limparOpcoesAtivas(newProperty.acabamentos || []),
         proximidades: limparOpcoesAtivas(newProperty.proximidades || []),
-        caracteristicasEmpreendimento: limparOpcoesAtivas(newProperty.caracteristicasEmpreendimento || [])
+        caracteristicasEmpreendimento: limparOpcoesAtivas(newProperty.caracteristicasEmpreendimento || newProperty.caracteristicasCondominio || [])
       };
 
       if (newProperty.status === 'Vendido') {
@@ -3745,7 +3884,10 @@ export default function OwnerPortal({
       tituloAnuncio: property.tituloAnuncio || (property as any).titulo || property.title || '',
       subtituloAnuncio: property.subtituloAnuncio || '',
       descricaoCurta: property.descricaoCurta || '',
-      descricaoDetalhada: property.descricaoDetalhada || property.description || (property as any).descricao || '',
+      description: property.descricaoDetalhada || property.description || (property as any).descricao || (property as any).descricaoCompleta || '',
+      descricao: property.descricaoDetalhada || property.description || (property as any).descricao || (property as any).descricaoCompleta || '',
+      descricaoDetalhada: property.descricaoDetalhada || property.description || (property as any).descricao || (property as any).descricaoCompleta || '',
+      descricaoCompleta: property.descricaoDetalhada || property.description || (property as any).descricao || (property as any).descricaoCompleta || '',
       diferenciaisAnuncio: property.diferenciaisAnuncio || '',
       textoWhatsapp: property.textoWhatsapp || '',
       textoInstagram: property.textoInstagram || '',
@@ -3839,45 +3981,54 @@ export default function OwnerPortal({
 
     setPriceError(null);
     
-    // Construct robust fotos objects array for the editor
-    const propertyFotos = Array.isArray(property.fotos) && property.fotos.length > 0
-      ? property.fotos.map((f: any, idx: number) => {
-          if (typeof f === 'string') {
-            return {
-              url: f,
-              secureUrl: f,
-              publicId: '',
-              originalFilename: f.split('/').pop() || '',
-              ordem: idx
-            };
-          }
-          return {
-            url: f.url || f.secureUrl || '',
-            secureUrl: f.secureUrl || f.url || '',
-            publicId: f.publicId || '',
-            originalFilename: f.originalFilename || '',
-            ordem: f.ordem !== undefined ? Number(f.ordem) : idx
-          };
-        })
-      : [property.image, ...(property.additionalImages || [])].filter(Boolean).map((url, idx) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: url.split('/').pop() || '',
-          ordem: idx
-        }));
+    // Extract all permanent image URLs
+    const editPermanentUrls: string[] = [];
+    const addEditPermanent = (u: any) => {
+      if (typeof u === 'string' && u.trim().startsWith('http')) {
+        const clean = u.trim();
+        if (!editPermanentUrls.includes(clean)) editPermanentUrls.push(clean);
+      }
+    };
 
-    const mainPic = property.fotoPrincipal || property.image || (propertyFotos[0]?.secureUrl || '');
+    if (Array.isArray(property.images)) property.images.forEach(addEditPermanent);
+    if (Array.isArray(property.fotos)) {
+      property.fotos.forEach((f: any) => {
+        if (typeof f === 'string') addEditPermanent(f);
+        else if (f?.secureUrl) addEditPermanent(f.secureUrl);
+        else if (f?.url) addEditPermanent(f.url);
+      });
+    }
+    if (Array.isArray((property as any).imagens)) {
+      (property as any).imagens.forEach((f: any) => {
+        if (typeof f === 'string') addEditPermanent(f);
+        else if (f?.secureUrl) addEditPermanent(f.secureUrl);
+        else if (f?.url) addEditPermanent(f.url);
+      });
+    }
+    if (property.fotoPrincipal) addEditPermanent(property.fotoPrincipal);
+    if (property.image) addEditPermanent(property.image);
+    if (Array.isArray(property.additionalImages)) property.additionalImages.forEach(addEditPermanent);
+
+    const propertyFotos = editPermanentUrls.map((url, idx) => ({
+      url,
+      secureUrl: url,
+      publicId: '',
+      originalFilename: url.split('/').pop() || `foto_${idx + 1}.jpg`,
+      ordem: idx
+    }));
+
+    const mainPic = editPermanentUrls[0] || property.fotoPrincipal || property.image || '';
 
     setNewProperty((prev: any) => ({
       ...prev,
+      images: editPermanentUrls,
       fotos: propertyFotos,
       fotoPrincipal: mainPic,
       image: mainPic,
-      additionalImages: propertyFotos.slice(1).map(f => f.secureUrl || f.url || '')
+      additionalImages: editPermanentUrls.length > 1 ? editPermanentUrls.slice(1) : []
     }));
 
-    setImageUrls(propertyFotos.map(f => f.secureUrl || f.url || ''));
+    setImageUrls(editPermanentUrls);
     setShowAddForm(true);
     setEditTab('dados_basicos');
   };
@@ -4262,30 +4413,21 @@ export default function OwnerPortal({
       return;
     }
 
-    const currentFotos = newProperty.fotos ? [...newProperty.fotos] : 
-      [newProperty.image, ...(newProperty.additionalImages || [])]
-        .filter(Boolean)
-        .map((url, idx) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: url.split('/').pop() || '',
-          ordem: idx
-        }));
-
     const uploadedFotos: any[] = [];
     let hasError = false;
 
     for (let i = 0; i < validFiles.length; i++) {
       try {
         const result = await uploadImagemCloudinary(validFiles[i]);
-        uploadedFotos.push({
-          url: result.secureUrl,
-          secureUrl: result.secureUrl,
-          publicId: result.publicId,
-          originalFilename: result.originalFilename,
-          ordem: currentFotos.length + uploadedFotos.length
-        });
+        if (result && result.secureUrl) {
+          uploadedFotos.push({
+            url: result.secureUrl,
+            secureUrl: result.secureUrl,
+            publicId: result.publicId || '',
+            originalFilename: result.originalFilename || validFiles[i].name || '',
+            ordem: i
+          });
+        }
       } catch (err: any) {
         console.error("Cloudinary upload file error: ", err);
         hasError = true;
@@ -4296,117 +4438,174 @@ export default function OwnerPortal({
       setUploadError("Houve uma falha ao enviar uma ou mais fotos para o Cloudinary.");
     }
 
-    const nextFotos = [...currentFotos, ...uploadedFotos].map((f, idx) => ({ ...f, ordem: idx }));
+    setNewProperty((prev: any) => {
+      const currentFotos = prev.fotos ? [...prev.fotos] : 
+        [prev.image, ...(prev.additionalImages || [])]
+          .filter(Boolean)
+          .map((url, idx) => ({
+            url,
+            secureUrl: url,
+            publicId: '',
+            originalFilename: typeof url === 'string' ? (url.split('/').pop() || '') : '',
+            ordem: idx
+          }));
 
-    let mainPic = newProperty.fotoPrincipal || newProperty.image || '';
-    if (!mainPic && nextFotos.length > 0) {
-      mainPic = nextFotos[0].secureUrl || nextFotos[0].url;
-    }
+      const combinedFotos = [...currentFotos, ...uploadedFotos].map((f, idx) => ({ ...f, ordem: idx }));
+      const permanentUrls: string[] = [];
+      combinedFotos.forEach(f => {
+        const u = f.secureUrl || f.url;
+        if (typeof u === 'string' && u.trim().startsWith('http') && !permanentUrls.includes(u.trim())) {
+          permanentUrls.push(u.trim());
+        }
+      });
 
-    const updatedState = {
-      ...newProperty,
-      fotos: nextFotos,
-      fotoPrincipal: mainPic,
-      image: mainPic,
-      additionalImages: nextFotos.slice(1).map(f => f.secureUrl || f.url || '')
-    };
+      let mainPic = prev.fotoPrincipal || prev.image || '';
+      if (!mainPic || !permanentUrls.includes(mainPic)) {
+        mainPic = permanentUrls[0] || '';
+      }
 
-    setNewProperty(updatedState);
-    setImageUrls(nextFotos.map(f => f.secureUrl || f.url || ''));
+      setImageUrls(permanentUrls);
+
+      return {
+        ...prev, // PRESERVES description, characteristics, title, EVERYTHING
+        images: permanentUrls,
+        fotos: combinedFotos,
+        fotoPrincipal: mainPic,
+        image: mainPic,
+        additionalImages: permanentUrls.length > 1 ? permanentUrls.slice(1) : []
+      };
+    });
+
     setUploadingImages(false);
   };
 
   const handleRemoveFoto = (index: number) => {
-    const currentFotos = newProperty.fotos ? [...newProperty.fotos] : 
-      [newProperty.image, ...(newProperty.additionalImages || [])]
-        .filter(Boolean)
-        .map((url, idx) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: url.split('/').pop() || '',
-          ordem: idx
-        }));
+    setNewProperty((prev: any) => {
+      const currentFotos = prev.fotos ? [...prev.fotos] : 
+        [prev.image, ...(prev.additionalImages || [])]
+          .filter(Boolean)
+          .map((url, idx) => ({
+            url,
+            secureUrl: url,
+            publicId: '',
+            originalFilename: typeof url === 'string' ? (url.split('/').pop() || '') : '',
+            ordem: idx
+          }));
 
-    const nextFotos = currentFotos.filter((_, idx) => idx !== index).map((f, idx) => ({ ...f, ordem: idx }));
-    
-    let mainPic = newProperty.fotoPrincipal || newProperty.image || '';
-    const removedPicUrl = currentFotos[index]?.secureUrl || currentFotos[index]?.url;
-    if (removedPicUrl === mainPic) {
-      mainPic = nextFotos.length > 0 ? (nextFotos[0].secureUrl || nextFotos[0].url) : '';
-    }
+      const nextFotos = currentFotos.filter((_, idx) => idx !== index).map((f, idx) => ({ ...f, ordem: idx }));
+      const permanentUrls: string[] = [];
+      nextFotos.forEach(f => {
+        const u = f.secureUrl || f.url;
+        if (typeof u === 'string' && u.trim().startsWith('http') && !permanentUrls.includes(u.trim())) {
+          permanentUrls.push(u.trim());
+        }
+      });
 
-    setNewProperty({
-      ...newProperty,
-      fotos: nextFotos,
-      fotoPrincipal: mainPic,
-      image: mainPic,
-      additionalImages: nextFotos.slice(1).map(f => f.secureUrl || f.url || '')
+      let mainPic = prev.fotoPrincipal || prev.image || '';
+      const removedPicUrl = currentFotos[index]?.secureUrl || currentFotos[index]?.url;
+      if (removedPicUrl === mainPic || !permanentUrls.includes(mainPic)) {
+        mainPic = permanentUrls[0] || '';
+      }
+
+      setImageUrls(permanentUrls);
+
+      return {
+        ...prev,
+        images: permanentUrls,
+        fotos: nextFotos,
+        fotoPrincipal: mainPic,
+        image: mainPic,
+        additionalImages: permanentUrls.length > 1 ? permanentUrls.slice(1) : []
+      };
     });
-    setImageUrls(nextFotos.map(f => f.secureUrl || f.url || ''));
   };
 
   const handleSetPrincipalFoto = (index: number) => {
-    const currentFotos = newProperty.fotos ? [...newProperty.fotos] : 
-      [newProperty.image, ...(newProperty.additionalImages || [])]
-        .filter(Boolean)
-        .map((url, idx) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: url.split('/').pop() || '',
-          ordem: idx
-        }));
+    setNewProperty((prev: any) => {
+      const currentFotos = prev.fotos ? [...prev.fotos] : 
+        [prev.image, ...(prev.additionalImages || [])]
+          .filter(Boolean)
+          .map((url, idx) => ({
+            url,
+            secureUrl: url,
+            publicId: '',
+            originalFilename: typeof url === 'string' ? (url.split('/').pop() || '') : '',
+            ordem: idx
+          }));
 
-    if (index >= currentFotos.length) return;
+      if (index >= currentFotos.length) return prev;
 
-    const targetFoto = currentFotos[index];
-    const remainingFotos = currentFotos.filter((_, idx) => idx !== index);
-    const nextFotos = [targetFoto, ...remainingFotos].map((f, idx) => ({ ...f, ordem: idx }));
+      const targetFoto = currentFotos[index];
+      const remainingFotos = currentFotos.filter((_, idx) => idx !== index);
+      const nextFotos = [targetFoto, ...remainingFotos].map((f, idx) => ({ ...f, ordem: idx }));
 
-    const mainPic = targetFoto.secureUrl || targetFoto.url;
+      const permanentUrls: string[] = [];
+      nextFotos.forEach(f => {
+        const u = f.secureUrl || f.url;
+        if (typeof u === 'string' && u.trim().startsWith('http') && !permanentUrls.includes(u.trim())) {
+          permanentUrls.push(u.trim());
+        }
+      });
 
-    setNewProperty({
-      ...newProperty,
-      fotos: nextFotos,
-      fotoPrincipal: mainPic,
-      image: mainPic,
-      additionalImages: nextFotos.slice(1).map(f => f.secureUrl || f.url || '')
+      const mainPic = targetFoto.secureUrl || targetFoto.url || permanentUrls[0] || '';
+
+      setImageUrls(permanentUrls);
+
+      return {
+        ...prev,
+        images: permanentUrls,
+        fotos: nextFotos,
+        fotoPrincipal: mainPic,
+        image: mainPic,
+        additionalImages: permanentUrls.length > 1 ? permanentUrls.slice(1) : []
+      };
     });
-    setImageUrls(nextFotos.map(f => f.secureUrl || f.url || ''));
   };
 
   const handleMoveFoto = (index: number, direction: 'up' | 'down') => {
-    const currentFotos = newProperty.fotos ? [...newProperty.fotos] : 
-      [newProperty.image, ...(newProperty.additionalImages || [])]
-        .filter(Boolean)
-        .map((url, idx) => ({
-          url,
-          secureUrl: url,
-          publicId: '',
-          originalFilename: url.split('/').pop() || '',
-          ordem: idx
-        }));
+    setNewProperty((prev: any) => {
+      const currentFotos = prev.fotos ? [...prev.fotos] : 
+        [prev.image, ...(prev.additionalImages || [])]
+          .filter(Boolean)
+          .map((url, idx) => ({
+            url,
+            secureUrl: url,
+            publicId: '',
+            originalFilename: typeof url === 'string' ? (url.split('/').pop() || '') : '',
+            ordem: idx
+          }));
 
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === currentFotos.length - 1) return;
+      if (direction === 'up' && index === 0) return prev;
+      if (direction === 'down' && index === currentFotos.length - 1) return prev;
 
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const temp = currentFotos[index];
-    currentFotos[index] = currentFotos[targetIndex];
-    currentFotos[targetIndex] = temp;
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      const copy = [...currentFotos];
+      const temp = copy[index];
+      copy[index] = copy[targetIndex];
+      copy[targetIndex] = temp;
 
-    const nextFotos = currentFotos.map((f, idx) => ({ ...f, ordem: idx }));
-    const mainPic = nextFotos[0] ? (nextFotos[0].secureUrl || nextFotos[0].url) : '';
+      const nextFotos = copy.map((f, idx) => ({ ...f, ordem: idx }));
+      const permanentUrls: string[] = [];
+      nextFotos.forEach(f => {
+        const u = f.secureUrl || f.url;
+        if (typeof u === 'string' && u.trim().startsWith('http') && !permanentUrls.includes(u.trim())) {
+          permanentUrls.push(u.trim());
+        }
+      });
 
-    setNewProperty({
-      ...newProperty,
-      fotos: nextFotos,
-      fotoPrincipal: mainPic,
-      image: mainPic,
-      additionalImages: nextFotos.slice(1).map(f => f.secureUrl || f.url || '')
+      const mainPic = nextFotos[0] ? (nextFotos[0].secureUrl || nextFotos[0].url) : (prev.fotoPrincipal || '');
+
+      setImageUrls(permanentUrls);
+
+      return {
+        ...prev,
+        images: permanentUrls,
+        fotos: nextFotos,
+        fotoPrincipal: mainPic,
+        image: mainPic,
+        additionalImages: permanentUrls.length > 1 ? permanentUrls.slice(1) : []
+      };
     });
-    setImageUrls(nextFotos.map(f => f.secureUrl || f.url || ''));
   };
 
   const addImageUrlField = () => setImageUrls([...imageUrls, '']);
